@@ -610,3 +610,10 @@ details.ac-provider-model-block[open] > summary.ac-provider-model-group::before 
 .ac-provider-model-off[open] > summary::after { transform: rotate(-135deg) translateY(-1px); }
 .ac-provider-model-off > summary .count { font-family: var(--ac-font-mono); color: var(--ac-muted); }
 .ac-provider-model-off[open] > .ac-provider-model-list { margin-top: 8px; }
+
+/* Publishing page: override the legacy dark table / number-input rules in index.css */
+.ac-publishing .ant-table, .ac-publishing .ant-table-container { background-color: var(--ac-card) !important; color: var(--ac-ink) !important; }
+.ac-publishing .ant-table-thead > tr > th { background-color: var(--ac-line-2) !important; color: var(--ac-sub) !important; border-bottom: 1px solid var(--ac-line) !important; }
+.ac-publishing .ant-table-tbody > tr > td, .ac-publishing .ant-table-placeholder > td { background-color: var(--ac-card) !important; color: var(--ac-ink) !important; border-bottom: 1px solid var(--ac-line-2) !important; }
+.ac-publishing .ant-table-tbody > tr:hover > td { background-color: var(--ac-line-2) !important; }
+.ac-publishing .ant-input-number, .ac-publishing .ant-input-number .ant-input-number-input { background-color: var(--ac-card) !important; border-color: var(--ac-line) !important; color: var(--ac-ink) !important; }

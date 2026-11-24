@@ -354,7 +354,7 @@ const PublishingPage: React.FC = () => {
   const configured = status?.platforms.filter((p) => p.configured).length || 0
 
   return (
-    <div className="ac-page" style={{ maxWidth: 1240 }}>
+    <div className="ac-page ac-publishing" style={{ maxWidth: 1240 }}>
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: 12 }}>
         <div>
           <h1 className="ac-title" style={{ marginTop: 0 }}>Publishing</h1>
