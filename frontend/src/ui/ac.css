@@ -631,7 +631,7 @@ details.ac-provider-model-block[open] > summary.ac-provider-model-group::before 
 .ac-brand-btn--block { display: flex; width: 100%; }
 .ac-brand-btn__icon { display: inline-flex; }
 .ac-brand-btn--tiktok { background: #000000; color: #FFFFFF; }
-.ac-brand-btn--instagram { color: #FFFFFF; background: radial-gradient(circle at 30% 107%, #fdf497 0%, #fdf497 5%, #fd5949 45%, #d6249f 60%, #285AEB 90%); }
+.ac-brand-btn--instagram { color: #FFFFFF; background: linear-gradient(45deg, #f09433 0%, #e6683c 22%, #dc2743 45%, #cc2366 70%, #bc1888 100%); text-shadow: 0 1px 1px rgba(0,0,0,.18); }
 .ac-brand-btn--youtube { background: #FFFFFF; color: #1F1F1F; border-color: #747775; }
 [data-theme='dark'] .ac-brand-btn--youtube, .dark .ac-brand-btn--youtube { background: #131314; color: #E3E3E3; border-color: #8E918F; }
 [data-theme='dark'] .ac-brand-btn--tiktok, .dark .ac-brand-btn--tiktok { border-color: #3a3a3a; }

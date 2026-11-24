@@ -1,4 +1,5 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { Button, Popover, Typography } from 'antd'
 import { LinkOutlined } from '@ant-design/icons'
 import BrandLoginButton from './BrandLoginButton'
@@ -9,6 +10,8 @@ const HeaderConnect: React.FC = () => {
   const [open, setOpen] = useState(false)
   const [status, setStatus] = useState<SocialStatus>()
   const [count, setCount] = useState<number>()
+  const location = useLocation()
+  useEffect(() => { setOpen(false) }, [location.pathname, location.search])
   const onOpenChange = (next: boolean) => {
     setOpen(next)
     if (next) {
