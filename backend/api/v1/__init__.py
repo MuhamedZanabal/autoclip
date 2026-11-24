@@ -68,4 +68,8 @@ api_router.include_router(example_project_router, tags=["example-project"])
 from .diagnostics import router as diagnostics_router
 api_router.include_router(diagnostics_router, tags=["diagnostics"])
 
+# Native social publisher (TikTok / Instagram Reels / YouTube Shorts + long-form via official OAuth APIs)
+from backend.publisher.api import router as social_router
+api_router.include_router(social_router)
+
 __all__ = ["api_router"]

@@ -1,3 +1,4 @@
+import { buildApiUrl } from '../utils/apiConfig'
 import { t } from '../i18n'
 import { useTranslation } from 'react-i18next'
 import React, { useMemo, useState } from 'react'
@@ -32,7 +33,7 @@ const CollectionCard: React.FC<CollectionCardProps> = ({ collection, clips, onVi
   const thumbnailUrl = useMemo(() => {
     if (!collection.project_id) return ''
     const ts = encodeURIComponent(collection.created_at || '')
-    return `/api/v1/projects/${collection.project_id}/collections/${collection.id}/thumbnail?t=${ts}`
+    return buildApiUrl(`/projects/${collection.project_id}/collections/${collection.id}/thumbnail?t=${ts}`)
   }, [collection.project_id, collection.id, collection.created_at])
 
   const [imgError, setImgError] = useState(false)

@@ -1,3 +1,4 @@
+import { buildApiUrl } from '../utils/apiConfig';
 import { useState, useCallback } from 'react';
 import { TaskUpdateMessage, ProjectUpdateMessage } from './useWebSocket';
 
@@ -114,7 +115,7 @@ export const useTaskStatus = () => {
     console.log('📤 开始加载项目任务:', projectId);
     setLoading(true);
     try {
-      const response = await fetch(`/api/v1/tasks/project/${projectId}`);
+      const response = await fetch(buildApiUrl(`/tasks/project/${projectId}`));
       console.log('📡 API响应状态:', response.status);
       
       if (response.ok) {

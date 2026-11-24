@@ -1,6 +1,11 @@
 # AutoClip Dockerfile
 # 多阶段构建，优化镜像大小
 
+# Deno runtime for yt-dlp's YouTube JS-challenge solver (yt-dlp-ejs). Pinned, multi-arch
+# official image instead of piping an install script into sh at runtime.
+ARG DENO_VERSION=2.9.8
+FROM denoland/deno:bin-${DENO_VERSION} AS deno
+
 # 第一阶段：构建前端
 FROM node:18-slim AS frontend-builder
 
@@ -28,6 +33,10 @@ COPY backend/presets/provider_presets.json /app/backend/presets/provider_presets
 COPY backend/assets/example/cover.jpg /app/backend/assets/example/cover.jpg
 COPY backend/presets/provider_quality.json /app/backend/presets/provider_quality.json
 COPY backend/core/event_catalog.json backend/core/failure_messages.json /app/backend/core/
+
+# Path-prefixed web deployments (e.g. nginx /autoclip/) pass VITE_API_BASE=/autoclip/api/v1.
+ARG VITE_API_BASE=
+ENV VITE_API_BASE=${VITE_API_BASE}
 
 # 构建前端
 RUN npm run build
@@ -57,6 +66,12 @@ COPY requirements.txt ./
 # 安装Python依赖
 RUN pip install --no-cache-dir -r requirements.txt
 
+# YouTube changes its player often; keep yt-dlp + the EJS solver current without editing the
+# desktop pin in requirements.txt (override with --build-arg when YouTube breaks again).
+ARG YTDLP_VERSION=2026.10.26
+ARG YTDLP_EJS_VERSION=0.8.0
+RUN pip install --no-cache-dir -U "yt-dlp[default]==${YTDLP_VERSION}" "yt-dlp-ejs==${YTDLP_EJS_VERSION}"
+
 # 第三阶段：最终镜像
 FROM python:3.11-slim
 
@@ -82,6 +97,7 @@ WORKDIR /app
 COPY --from=backend-builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=backend-builder /usr/local/bin /usr/local/bin
 COPY --from=frontend-builder /app/frontend/dist /app/frontend/dist
+COPY --from=deno /deno /usr/local/bin/deno
 
 # 复制项目文件
 COPY backend/ ./backend/

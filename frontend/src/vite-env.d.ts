@@ -9,6 +9,8 @@ interface ImportMetaEnv {
   readonly VITE_PUBLIC_SENTRY_DSN?: string
   /** 打包时注入的应用版本，给 Sentry release 用。 */
   readonly VITE_APP_VERSION?: string
+  /** API base for path-prefixed web deployments, e.g. /autoclip/api/v1 */
+  readonly VITE_API_BASE?: string
   /** Dev-only flag overrides, `name=value` comma separated. Ignored in production builds. */
   readonly VITE_FLAGS?: string
 }
@@ -52,3 +54,5 @@ declare module '*.svg?react' {
   const ReactComponent: React.FunctionComponent<React.SVGProps<SVGSVGElement>>
   export default ReactComponent
 }
+/** Injected by vite.config.ts from VITE_API_BASE (build-time); undefined in tests. */
+declare const __AUTOCLIP_API_BASE__: string | undefined

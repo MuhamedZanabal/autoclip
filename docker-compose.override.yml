@@ -1,14 +1,53 @@
+# zedosai.com deployment overrides (loaded automatically by `docker compose`).
+# - Everything binds to 127.0.0.1; nginx terminates TLS and adds basic auth under /autoclip/.
+# - Secrets live only in /opt/autoclip/.env (chmod 600); compose substitutes them below.
+# - Container logs are capped (json-file, 3 x 10 MB) so they can't fill the disk.
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-social-env: &social-env
+  AUTOCLIP_PUBLIC_URL: ${AUTOCLIP_PUBLIC_URL:-}
+  SOCIAL_TOKEN_KEY: ${SOCIAL_TOKEN_KEY:-}
+  SOCIAL_MEDIA_URL_TTL: ${SOCIAL_MEDIA_URL_TTL:-7200}
+  TIKTOK_CLIENT_KEY: ${TIKTOK_CLIENT_KEY:-}
+  TIKTOK_CLIENT_SECRET: ${TIKTOK_CLIENT_SECRET:-}
+  TIKTOK_APP_AUDITED: ${TIKTOK_APP_AUDITED:-false}
+  TIKTOK_SCOPES: ${TIKTOK_SCOPES:-user.info.basic,video.publish}
+  INSTAGRAM_LOGIN_MODE: ${INSTAGRAM_LOGIN_MODE:-instagram}
+  INSTAGRAM_APP_ID: ${INSTAGRAM_APP_ID:-}
+  INSTAGRAM_APP_SECRET: ${INSTAGRAM_APP_SECRET:-}
+  META_APP_ID: ${META_APP_ID:-}
+  META_APP_SECRET: ${META_APP_SECRET:-}
+  META_GRAPH_VERSION: ${META_GRAPH_VERSION:-v26.0}
+  GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+  GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+  GOOGLE_APP_VERIFIED: ${GOOGLE_APP_VERIFIED:-false}
+  SOCIAL_SEO_LLM_MODEL: ${SOCIAL_SEO_LLM_MODEL:-}
+  SOCIAL_SEO_LLM_FALLBACK_MODELS: ${SOCIAL_SEO_LLM_FALLBACK_MODELS:-auto}
+  SOCIAL_SEO_LLM_TIMEOUT: ${SOCIAL_SEO_LLM_TIMEOUT:-45}
+
 services:
   redis:
     ports: !override []
     restart: unless-stopped
+    logging: *default-logging
 
   autoclip:
+    build:
+      args:
+        VITE_API_BASE: /autoclip/api/v1
     ports: !override
       - "127.0.0.1:8030:8000"
     networks:
       - default
       - zanabot-link
+    environment:
+      <<: *social-env
+    logging: *default-logging
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health/"]
       interval: 30s
@@ -17,9 +56,17 @@ services:
       start_period: 90s
 
   celery-worker:
+    build:
+      args:
+        VITE_API_BASE: /autoclip/api/v1
     networks:
       - default
       - zanabot-link
+    environment:
+      <<: *social-env
+      # The worker runs publish jobs and auto-publish; it needs the LLM proxy for SEO copy.
+      API_MODEL_NAME: ${API_MODEL_NAME:-}
+    logging: *default-logging
     healthcheck:
       test:
         [
@@ -32,6 +79,10 @@ services:
       start_period: 60s
 
   celery-beat:
+    build:
+      args:
+        VITE_API_BASE: /autoclip/api/v1
+    logging: *default-logging
     healthcheck:
       disable: true
 
@@ -39,13 +90,13 @@ services:
     profiles: ["monitoring"]
     ports: !override
       - "127.0.0.1:5555:5555"
+    logging: *default-logging
 
-  # Serve built SPA (production image has dist; stock compose only runs uvicorn)
+  # Serve the built SPA. Runs as the image's unprivileged `autoclip` user (port 3000 > 1024).
   autoclip-web:
     image: autoclip:local
     container_name: autoclip-web
     restart: unless-stopped
-    user: "0:0"
     entrypoint:
       [
         "python",
@@ -62,6 +113,7 @@ services:
     depends_on:
       autoclip:
         condition: service_healthy
+    logging: *default-logging
     healthcheck:
       test:
         [

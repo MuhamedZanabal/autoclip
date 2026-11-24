@@ -63,6 +63,15 @@ class CeleryConfig:
             'task': 'backend.tasks.maintenance.health_check',
             'schedule': crontab(minute='*/5'),  # 每5分钟
         },
+        # Native social publisher: queue, scheduled posts, retries, remote-status polling, auto-publish.
+        'social-publisher-tick': {
+            'task': 'backend.publisher.tasks.publisher_tick',
+            'schedule': 60.0,
+        },
+        'social-publisher-refresh-tokens': {
+            'task': 'backend.publisher.tasks.refresh_tokens',
+            'schedule': crontab(minute=17),
+        },
     }
     
     # 结果配置
@@ -146,7 +155,8 @@ celery_app.autodiscover_tasks([
     'backend.tasks.video', 
     'backend.tasks.notification',
     'backend.tasks.maintenance',
-    'backend.tasks.import_processing'  # 添加导入处理任务
+    'backend.tasks.import_processing',  # 添加导入处理任务
+    'backend.publisher.tasks',
 ])
 
 if __name__ == '__main__':
