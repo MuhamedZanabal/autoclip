@@ -100,3 +100,4 @@ def test_language_detection_and_cjk_keywords():
 
 def test_parse_json_object_tolerates_fences():
     assert seo.parse_json_object('```json\n{"a": 1}\n```') == {"a": 1}
+    assert seo.parse_json_object('{"a": [1, 2,], "b": 3,}') == {"a": [1, 2], "b": 3}

@@ -159,3 +159,6 @@ control/
 
 # Python 打包产物
 *.egg-info/
+
+# Server-side secrets / cookie jars (zedosai deployment)
+data/cookies/

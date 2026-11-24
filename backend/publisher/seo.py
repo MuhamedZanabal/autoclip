@@ -56,7 +56,9 @@ is are was were be been being am do does did done have has had having i you he s
 your his its our their this that these those there here what which who whom whose when where why how not no yes just
 very really can could would should will shall may might must also than too more most much many some any all each
 every both few other such only own same s t don now like get got go going gonna know think say said one two lot
-thing things yeah okay ok um uh right well actually because way even still back make made want need see look""".split())
+thing things yeah okay ok um uh right well actually because way even still back make made want need see look
+people going gonna sort kind lots maybe something someone everyone anything everything little pretty quite
+next last first time times year years month months week today tomorrow yesterday mean means said says tell""".split())
 
 
 # ------------------------------------------------------------- inputs ---
@@ -185,7 +187,8 @@ def extract_keywords(text: str, language: str, top: int = 10) -> list[str]:
                     grams[run[i:i + n]] += 1 if n == 2 else 2
         return [g for g, _ in grams.most_common(top)]
     words = [w.lower() for w in re.findall(r"[A-Za-z][A-Za-z0-9'+-]{2,}", text)]
-    words = [w.strip("'") for w in words if w.lower() not in STOPWORDS]
+    # Drop contractions ("you're", "it'll") and filler; keep 4+ letter content words.
+    words = [w for w in words if "'" not in w and "’" not in w and len(w) >= 4 and w not in STOPWORDS]
     counts = Counter(words)
     bigrams = Counter(f"{a} {b}" for a, b in zip(words, words[1:]) if a != b)
     ranked = [b for b, c in bigrams.most_common(top) if c >= 2] + [w for w, _ in counts.most_common(top * 2)]
@@ -220,15 +223,17 @@ TRANSCRIPT (timestamps are seconds from clip start):
 """
 
 
-def _llm_settings() -> tuple[str, str, str, float]:
+def _llm_settings() -> tuple[str, str, list[str], float]:
     base = (os.getenv("SOCIAL_SEO_LLM_BASE_URL") or os.getenv("OPENAI_BASE_URL") or "").rstrip("/")
     key = os.getenv("SOCIAL_SEO_LLM_API_KEY") or os.getenv("API_OPENAI_API_KEY") or ""
-    model = os.getenv("SOCIAL_SEO_LLM_MODEL") or os.getenv("API_MODEL_NAME") or "auto"
+    primary = os.getenv("SOCIAL_SEO_LLM_MODEL") or os.getenv("API_MODEL_NAME") or "auto"
+    fallbacks = [m.strip() for m in os.getenv("SOCIAL_SEO_LLM_FALLBACK_MODELS", "auto").split(",") if m.strip()]
+    models = list(dict.fromkeys([primary, *fallbacks]))
     try:
-        timeout = float(os.getenv("SOCIAL_SEO_LLM_TIMEOUT", "90"))
+        timeout = float(os.getenv("SOCIAL_SEO_LLM_TIMEOUT", "60"))
     except ValueError:
-        timeout = 90.0
-    return base, key, model, timeout
+        timeout = 60.0
+    return base, key, models, timeout
 
 
 def parse_json_object(text: str) -> dict:
@@ -237,26 +242,40 @@ def parse_json_object(text: str) -> dict:
     start, end = text.find("{"), text.rfind("}")
     if start < 0 or end <= start:
         raise ValueError("no JSON object in model output")
-    return json.loads(text[start:end + 1])
+    raw = text[start:end + 1]
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        # Common model slip: trailing commas before a closing bracket.
+        return json.loads(re.sub(r",\s*([}\]])", r"\1", raw))
 
 
 def call_llm(prompt: str) -> tuple[dict, str]:
+    """Try the configured model, then each fallback (FreeLLMAPI routes 'auto' per call)."""
     import httpx
-    base, key, model, timeout = _llm_settings()
+    base, key, models, timeout = _llm_settings()
     if not base:
         raise RuntimeError("no LLM base URL configured")
     headers = {"Content-Type": "application/json"}
     if key:
         headers["Authorization"] = f"Bearer {key}"
-    body = {"model": model, "temperature": 0.4, "max_tokens": 1800,
-            "messages": [{"role": "system", "content": "You output strict JSON only."},
-                         {"role": "user", "content": prompt}]}
-    resp = httpx.post(f"{base}/chat/completions", json=body, headers=headers, timeout=timeout)
-    if resp.status_code >= 400:
-        raise RuntimeError(f"LLM HTTP {resp.status_code}")
-    data = resp.json()
-    content = data["choices"][0]["message"]["content"]
-    return parse_json_object(content), str(data.get("model") or model)
+    errors = []
+    for model in models:
+        body = {"model": model, "temperature": 0.4, "max_tokens": 1800,
+                "messages": [{"role": "system", "content": "You output strict JSON only."},
+                             {"role": "user", "content": prompt}]}
+        try:
+            resp = httpx.post(f"{base}/chat/completions", json=body, headers=headers, timeout=timeout)
+            if resp.status_code >= 400:
+                raise RuntimeError(f"HTTP {resp.status_code}")
+            data = resp.json()
+            draft = parse_json_object(data["choices"][0]["message"]["content"])
+            if not draft.get("primary_keyword"):
+                raise ValueError("missing primary_keyword")
+            return draft, str(data.get("model") or model)
+        except Exception as exc:  # noqa: BLE001 - try the next model
+            errors.append(f"{model}: {type(exc).__name__} {str(exc)[:80]}")
+    raise RuntimeError("all SEO models failed: " + "; ".join(errors))
 
 
 def transcript_for_prompt(ctx: ClipContext, limit: int = 6000) -> str:

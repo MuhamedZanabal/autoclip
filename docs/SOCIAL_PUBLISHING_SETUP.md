@@ -205,6 +205,7 @@ What AutoClip does for each kind of video:
 | `GOOGLE_APP_VERIFIED` | no | `true` once the consent screen is published or verified (only changes UI hints) |
 | `SOCIAL_MEDIA_URL_TTL` | no | Seconds a signed media link stays valid (default 7200) |
 | `SOCIAL_SEO_LLM_MODEL` | no | A separate model for caption writing |
+| `SOCIAL_SEO_LLM_FALLBACK_MODELS` | no | Models tried in order when the first one fails or returns bad JSON (default `auto`) |
 
 ## 6. Security model
 
