@@ -84,8 +84,17 @@ class PublishResult:
 class BaseAdapter:
     platform = ""
 
+    #: PKCE challenge encoding: "b64" (RFC 7636 base64url S256), "hex" (TikTok's hex SHA-256 S256) or None.
+    pkce_style: str | None = None
+    #: Whether disconnect can revoke the grant through the platform API.
+    supports_revoke: bool = False
+
     def __init__(self, client: httpx.Client | None = None):
         self._client = client
+
+    @property
+    def uses_pkce(self) -> bool:
+        return self.pkce_style is not None
 
     @property
     def client(self) -> httpx.Client:

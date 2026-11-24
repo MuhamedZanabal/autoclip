@@ -31,6 +31,19 @@ class InstagramAdapter(BaseAdapter):
         return config.instagram_login_mode()
 
     @property
+    def supports_revoke(self) -> bool:  # type: ignore[override]
+        # Facebook Login grants can be revoked with DELETE /me/permissions. Instagram Login has no
+        # revoke endpoint: the user removes the app in Instagram > Settings > Apps and websites.
+        return self.mode == "facebook"
+
+    def revoke(self, token):
+        if self.mode != "facebook":
+            return None
+        resp = self.request("DELETE", f"https://graph.facebook.com/{config.meta_graph_version()}/me/permissions",
+                            "revoke", params={"access_token": token.access_token})
+        self.raise_for_http(resp, "Instagram revoke")
+
+    @property
     def graph(self) -> str:
         host = "https://graph.instagram.com" if self.mode == "instagram" else "https://graph.facebook.com"
         return f"{host}/{config.meta_graph_version()}"

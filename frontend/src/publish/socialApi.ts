@@ -20,6 +20,18 @@ export interface PlatformStatus {
   missing_env: string[]
   redirect_uri: string
   login_mode?: string
+  /** where the developer-app credentials come from: server .env (wins) or entered in the UI */
+  source?: 'env' | 'db' | null
+  env_locked?: boolean
+  client_id_masked?: string
+  secret_set?: boolean
+  env_names?: string[]
+  pkce?: boolean
+  console_url?: string
+  docs_url?: string
+  setup_guide_url?: string
+  id_label?: string
+  secret_label?: string
 }
 export interface SocialStatus {
   platforms: PlatformStatus[]
@@ -36,6 +48,9 @@ export interface SocialAccount {
   status: string
   last_error?: string
   access_expires_at?: string
+  external_id?: string
+  scopes?: string[]
+  created_at?: string
   metadata?: Record<string, unknown>
 }
 export interface Caption {
@@ -109,6 +124,10 @@ export const socialApi = {
   accounts: (): Promise<{ accounts: SocialAccount[] }> => api.get('/social/accounts'),
   disconnect: (id: string): Promise<unknown> => api.delete(`/social/accounts/${id}`),
   connectUrl: (platform: Platform): string => mediaUrl(`/social/oauth/${platform}/start`),
+  apps: (): Promise<{ apps: PlatformStatus[]; token_encryption: boolean; public_url: string }> => api.get('/social/apps'),
+  saveApp: (platform: Platform, body: { client_id: string; client_secret?: string }): Promise<PlatformStatus> =>
+    api.put(`/social/apps/${platform}`, body),
+  deleteApp: (platform: Platform): Promise<PlatformStatus & { removed: boolean }> => api.delete(`/social/apps/${platform}`),
   settings: (): Promise<PublisherSettings> => api.get('/social/settings'),
   saveSettings: (patch: Partial<PublisherSettings>): Promise<PublisherSettings> => api.put('/social/settings', patch),
   clips: (projectId?: string): Promise<{ clips: ClipRow[] }> =>

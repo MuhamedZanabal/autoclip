@@ -13,7 +13,27 @@ This guide covers the zedosai.com deployment (`https://zedosai.com/autoclip/`). 
 | Instagram | Instagram API with Instagram Login (Reels via `/media` + `/media_publish`) | `https://zedosai.com/autoclip/api/v1/social/oauth/instagram/callback` |
 | YouTube | YouTube Data API v3 `videos.insert` (resumable) | `https://zedosai.com/autoclip/api/v1/social/oauth/youtube/callback` |
 
-The **Publishing → Accounts** tab shows each platform's redirect URI and which `.env` variables are still missing.
+### Two ways to enter the app keys
+
+- **In the UI (easiest): Publishing → Developer apps.** Paste the client ID/key and secret for each platform and click
+  **Save**. They are encrypted with `SOCIAL_TOKEN_KEY` and stored in the `social_app_credentials` table. The secret is
+  never sent back to the browser; the screen only shows a masked client ID. Each card shows the exact redirect URI with a
+  copy button, plus links to the developer console, the platform docs and this guide.
+- **In the server `.env`** (section 0). Any `.env` value for a platform takes precedence over the UI, and the UI then
+  shows that platform as locked.
+
+### The login buttons
+
+**Log in with TikTok**, **Log in with Instagram** and **Sign in with Google** (YouTube) appear on Publishing → Accounts,
+on the Publishing page's connect strip and under **Connect** in the header. Clicking one opens
+`/autoclip/api/v1/social/oauth/{platform}/start` as a normal page load. Because it is the same site, the browser sends
+the AutoClip basic-auth login with it, and the server answers with a 302 to the platform's sign-in page. After consent
+the platform returns to the public callback, AutoClip stores the encrypted tokens, and you land back on Accounts with a
+success or error message. While a platform has no keys yet, its button shows **Set up** and opens Developer apps instead.
+
+Connect as many accounts per platform as you like: use **Add another … account**. **Reconnect** refreshes an existing account's
+grant. **Disconnect** revokes the grant on TikTok and Google. Instagram Login has no revoke API, so also remove the app in
+Instagram → Settings → Apps and websites.
 
 ---
 
@@ -30,6 +50,7 @@ SOCIAL_TOKEN_KEY=<generated>
 TIKTOK_CLIENT_KEY=
 TIKTOK_CLIENT_SECRET=
 TIKTOK_APP_AUDITED=false          # set to true only after TikTok approves the Direct Post audit
+TIKTOK_PKCE=true                  # PKCE (hex SHA-256 challenge, TikTok's format); set false only if TikTok rejects it
 
 INSTAGRAM_LOGIN_MODE=instagram    # or "facebook", see section 2b
 INSTAGRAM_APP_ID=                 # the *Instagram* app ID from "API setup with Instagram login"
@@ -194,14 +215,17 @@ What AutoClip does for each kind of video:
 |---|---|---|
 | `AUTOCLIP_PUBLIC_URL` | yes | Base for redirect URIs and signed media links |
 | `SOCIAL_TOKEN_KEY` | yes | Fernet key that encrypts OAuth tokens at rest (DB table `social_accounts`) |
-| `TIKTOK_CLIENT_KEY` / `TIKTOK_CLIENT_SECRET` | TikTok | From the TikTok developer app |
+| `TIKTOK_CLIENT_KEY` / `TIKTOK_CLIENT_SECRET` | TikTok* | From the TikTok developer app |
 | `TIKTOK_APP_AUDITED` | TikTok | `true` only after the Direct Post audit; until then posts are `SELF_ONLY` |
 | `TIKTOK_SCOPES` | no | Default `user.info.basic,video.publish` |
+| `TIKTOK_PKCE` | no | Default `true`: sends a PKCE challenge (hex SHA-256, as TikTok specifies) and the verifier on token exchange |
 | `INSTAGRAM_LOGIN_MODE` | no | `instagram` (default) or `facebook` |
 | `INSTAGRAM_APP_ID` / `INSTAGRAM_APP_SECRET` | Instagram (instagram mode) | From "API setup with Instagram business login" |
 | `META_APP_ID` / `META_APP_SECRET` | Instagram (facebook mode) | Meta app credentials |
 | `META_GRAPH_VERSION` | no | Default `v26.0` |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | YouTube | OAuth web client |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | YouTube* | OAuth web client |
+
+\* Or enter them in **Publishing → Developer apps** instead. `.env` wins when both are set.
 | `GOOGLE_APP_VERIFIED` | no | `true` once the consent screen is published or verified (only changes UI hints) |
 | `SOCIAL_MEDIA_URL_TTL` | no | Seconds a signed media link stays valid (default 7200) |
 | `SOCIAL_SEO_LLM_MODEL` | no | A separate model for caption writing |
@@ -211,6 +235,9 @@ What AutoClip does for each kind of video:
 
 - OAuth tokens are encrypted with Fernet (AES-128-CBC + HMAC-SHA256) before they reach SQLite. They are never returned by the API or written to logs.
 - Request logging redacts every URL query value. That covers the signed links, OAuth codes and states.
-- The public OAuth callback only accepts a single-use `state` that is at most 15 minutes old. YouTube also uses PKCE (S256).
+- The public OAuth callback only accepts a single-use `state` that is at most 15 minutes old and was minted for the same platform. Any attempt to use a state burns it.
+- PKCE (S256): Google uses the RFC 7636 base64url challenge. TikTok uses its documented hex SHA-256 challenge, and the verifier is sent with the token exchange. Instagram Login does not support PKCE, so it relies on `state`.
+- Developer-app keys entered in the UI are Fernet-encrypted like tokens. `GET /social/apps` and `/social/status` return only a masked client ID and a `secret_set` flag.
+- `/oauth/{platform}/start` stays behind basic auth, so only the AutoClip owner can start a connection. The callback and the signed media links are the only public routes.
 - Signed media links are HMAC-SHA256 over the job ID and expiry, using a key derived from `SOCIAL_TOKEN_KEY`. They only resolve while the job is in flight.
 - Disconnecting an account revokes the token at the platform (TikTok and Google revoke endpoints), deletes it locally, and cancels pending posts.

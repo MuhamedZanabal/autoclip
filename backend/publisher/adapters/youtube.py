@@ -24,6 +24,8 @@ CHUNK = 8 * 256 * 1024 * 4  # 8 MiB, a multiple of 256 KiB as the resumable prot
 
 class YouTubeAdapter(BaseAdapter):
     platform = "youtube"
+    pkce_style = "b64"
+    supports_revoke = True
 
     def authorize_url(self, state, code_challenge):
         self.require_configured()

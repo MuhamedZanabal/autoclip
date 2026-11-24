@@ -105,3 +105,13 @@ class SocialSetting(Base):
 
     key = Column(String(64), primary_key=True)
     value = Column(JSON, nullable=True)
+
+
+class SocialAppCredential(Base):
+    """Developer-app credentials entered in the UI (Fernet-encrypted). .env values take precedence."""
+    __tablename__ = "social_app_credentials"
+
+    platform = Column(String(20), primary_key=True)
+    client_id_encrypted = Column(Text, nullable=False)
+    client_secret_encrypted = Column(Text, nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=True)
