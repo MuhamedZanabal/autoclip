@@ -174,8 +174,19 @@ def render_for_target(row: dict, target: str, *, subtitles: bool = True) -> tupl
     # 1) AutoClip's own export pipeline (frame-accurate cut, burned captions, framing).
     try:
         from backend.services.publish_export import ExportRequest, export_clip
-        res = export_clip(ExportRequest(row["project_id"], row["id"], "shorts" if vertical else "original",
-                                        subtitles=subtitles, title_card=False))
+        # The exporter keys clips by the pipeline id in metadata/clips_metadata.json ("1", "2", ...),
+        # while the DB uses UUIDs, so try the pipeline id first.
+        ids = [i for i in dict.fromkeys([str(_json(row.get("clip_metadata")).get("id") or ""), str(row["id"])]) if i]
+        res, last = None, None
+        for cid in ids:
+            try:
+                res = export_clip(ExportRequest(row["project_id"], cid, "shorts" if vertical else "original",
+                                                subtitles=subtitles, title_card=False))
+                break
+            except FileNotFoundError as exc:
+                last = exc
+        if res is None:
+            raise last or FileNotFoundError("clip not found by exporter")
         path = Path(res["path"])
         if path.is_file():
             notes.extend(res.get("warnings") or [])
@@ -186,7 +197,7 @@ def render_for_target(row: dict, target: str, *, subtitles: bool = True) -> tupl
                 cached = path
             return path, float(res.get("duration_sec") or probe(path).get("duration") or 0), notes
     except Exception as exc:  # noqa: BLE001
-        notes.append(f"export pipeline unavailable ({type(exc).__name__}); used direct ffmpeg render")
+        notes.append(f"export pipeline unavailable ({type(exc).__name__}: {str(exc)[:120]}); used direct ffmpeg render")
     # 2) Direct render from the existing clip file or the raw source.
     clip_file = Path(row["video_path"]) if row.get("video_path") else None
     start, end = clip_window(row)

@@ -299,7 +299,8 @@ def heuristic_draft(ctx: ClipContext, language: str) -> dict:
         "primary_keyword": primary, "secondary_keywords": kws[1:8], "hook": ctx.title,
         "summary": summary, "cta": "你怎么看？评论区聊聊" if language == "zh" else "What do you think? Tell me in the comments.",
         "youtube_title": ctx.title, "shorts_title": ctx.title,
-        "broad_hashtags": broad, "niche_hashtags": kws[:4], "youtube_tags": [primary, *kws[:12]], "chapters": [],
+        "broad_hashtags": broad, "niche_hashtags": kws[:4],
+        "youtube_tags": list(dict.fromkeys([primary, *kws[:12]])), "chapters": [],
     }
 
 
