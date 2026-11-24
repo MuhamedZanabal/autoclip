@@ -331,9 +331,10 @@ def compose(target: str, draft: dict, ctx: ClipContext, language: str) -> tuple[
     hook = fit(str(draft.get("hook") or ctx.title), 90)
     summary = fit(str(draft.get("summary") or ""), 600)
     cta = fit(str(draft.get("cta") or ""), 120)
+    keywords = list(dict.fromkeys(k for k in [kw, *[fit(str(k), 60) for k in (draft.get("secondary_keywords") or [])]] if k))
+    keywords = [k for i, k in enumerate(keywords) if k.casefold() not in {x.casefold() for x in keywords[:i]}][:9]
     out: dict[str, Any] = {"target": target, "language": language, "primary_keyword": kw,
-                           "keywords": [kw, *[str(k) for k in (draft.get("secondary_keywords") or [])][:8]],
-                           "hashtags": hashtags}
+                           "keywords": keywords, "hashtags": hashtags}
 
     if target in ("tiktok", "instagram"):
         hook = _front_load(hook, kw, rules.visible_chars, 120)
@@ -405,7 +406,9 @@ def score(target: str, caption: dict, ctx: ClipContext) -> dict:
         check("hashtag_count", 1 <= n <= 3, f"{n} topical hashtags (YouTube shows the first 3)", 5)
         if rules.shorts_tag:
             check("shorts_tag", "#shorts" in (title + " " + desc).casefold(), "#Shorts present", 10)
-            check("shorts_duration", ctx.duration_sec <= 60.5, f"Clip {ctx.duration_sec:.0f}s <= 60s", 10)
+            check("shorts_duration", ctx.duration_sec <= 60.5,
+                  f"Clip {ctx.duration_sec:.0f}s fits Shorts (<= 60 s)" if ctx.duration_sec <= 60.5
+                  else f"Clip is {ctx.duration_sec:.0f}s: the Shorts render keeps the first 60 s", 10)
         if rules.chapters and ctx.duration_sec >= 60:
             check("chapters", bool(caption.get("chapters")), "3+ valid chapters (0:00 first, >=10 s each)", 10)
     has_broad_niche = len(tags) >= 2
