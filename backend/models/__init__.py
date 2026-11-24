@@ -8,7 +8,7 @@ from .clip import Clip
 from .collection import Collection
 from .task import Task, TaskStatus, TaskType
 from .bilibili import BilibiliAccount, UploadRecord
-from .social import SocialAccount, SocialPublishJob, SocialOAuthState, SocialSetting
+from .social import SocialAccount, SocialAppCredential, SocialPublishJob, SocialOAuthState, SocialSetting
 
 __all__ = [
     "Base",
@@ -25,4 +25,5 @@ __all__ = [
     "SocialPublishJob",
     "SocialOAuthState",
     "SocialSetting",
+    "SocialAppCredential",
 ]

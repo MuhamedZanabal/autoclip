@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import {
-  Alert, Avatar, Button, Card, Checkbox, Col, DatePicker, Empty, Input, InputNumber, List, message, Modal, Popconfirm,
+  Alert, Button, Card, Checkbox, Col, DatePicker, Empty, Input, InputNumber, message, Modal, Popconfirm,
   Progress, Row, Select, Space, Switch, Table, Tabs, Tag, Tooltip, Typography,
 } from 'antd'
 import dayjs, { Dayjs } from 'dayjs'
@@ -9,6 +9,8 @@ import {
   Caption, ClipRow, Platform, PLATFORM_LABEL, PublisherSettings, PublishJob, SeoReport, SeoResult, socialApi,
   SocialAccount, SocialStatus, Target, TARGET_LABEL,
 } from '../publish/socialApi'
+import { AccountsPanel, DeveloperAppsPanel, errText } from '../publish/AccountsAndApps'
+import BrandLoginButton from '../publish/BrandLoginButton'
 
 const { Text, Paragraph } = Typography
 
@@ -18,11 +20,6 @@ const STATUS_COLOR: Record<string, string> = {
 }
 const TARGETS_FOR: Record<Platform, Target[]> = { tiktok: ['tiktok'], instagram: ['instagram'], youtube: ['youtube_shorts', 'youtube'] }
 
-function errText(e: unknown): string {
-  const any = e as { response?: { data?: { detail?: string } }; message?: string }
-  return any?.response?.data?.detail || any?.message || String(e)
-}
-
 const ScoreBadge: React.FC<{ report?: SeoReport }> = ({ report }) => {
   if (!report || report.score === undefined) return null
   const color = report.score >= 80 ? '#3f8600' : report.score >= 60 ? '#d48806' : '#cf1322'
@@ -30,69 +27,6 @@ const ScoreBadge: React.FC<{ report?: SeoReport }> = ({ report }) => {
     <Tooltip title={<div>{report.checks?.map((c) => <div key={c.id}>{c.ok ? '✓' : '✗'} {c.detail}</div>)}</div>}>
       <Tag color={color} style={{ cursor: 'help' }}>SEO {report.score}</Tag>
     </Tooltip>
-  )
-}
-
-// ----------------------------------------------------------------- accounts ---
-const AccountsPanel: React.FC<{
-  status?: SocialStatus; accounts: SocialAccount[]; reload: () => void
-}> = ({ status, accounts, reload }) => {
-  const connect = (p: Platform) => { window.location.href = socialApi.connectUrl(p) }
-  return (
-    <Row gutter={[16, 16]}>
-      {(['tiktok', 'instagram', 'youtube'] as Platform[]).map((p) => {
-        const st = status?.platforms.find((x) => x.platform === p)
-        const mine = accounts.filter((a) => a.platform === p)
-        return (
-          <Col xs={24} md={8} key={p}>
-            <Card
-              title={PLATFORM_LABEL[p]}
-              data-testid={`account-card-${p}`}
-              extra={st?.configured ? <Tag color="green">App configured</Tag> : <Tag color="orange">Not configured</Tag>}
-            >
-              {!st?.configured && (
-                <Alert type="warning" showIcon style={{ marginBottom: 12 }}
-                  message="Developer app credentials missing"
-                  description={<>
-                    <div>Server .env needs: <Text code>{st?.missing_env.join(', ')}</Text></div>
-                    <div style={{ marginTop: 6 }}>Redirect URI to register:</div>
-                    <Text code copyable style={{ wordBreak: 'break-all' }}>{st?.redirect_uri}</Text>
-                  </>} />
-              )}
-              {p === 'tiktok' && st?.configured && !status?.notes.tiktok_audited && (
-                <Alert type="info" showIcon style={{ marginBottom: 12 }} message="Unaudited TikTok app: posts go out as private (SELF_ONLY) until TikTok approves the audit." />
-              )}
-              {p === 'youtube' && st?.configured && !status?.notes.google_verified && (
-                <Alert type="info" showIcon style={{ marginBottom: 12 }} message="Google app still in Testing: only listed test users can connect and they must reconnect every 7 days. Publish the consent screen to remove this." />
-              )}
-              <List
-                locale={{ emptyText: 'No account connected' }}
-                dataSource={mine}
-                renderItem={(a) => (
-                  <List.Item actions={[
-                    <Popconfirm key="d" title="Disconnect and revoke access?" onConfirm={async () => {
-                      try { await socialApi.disconnect(a.id); message.success('Disconnected'); reload() } catch (e) { message.error(errText(e)) }
-                    }}><Button size="small" danger>Disconnect</Button></Popconfirm>,
-                  ]}>
-                    <List.Item.Meta
-                      avatar={<Avatar src={a.avatar_url}>{(a.display_name || '?')[0]}</Avatar>}
-                      title={a.display_name || a.username}
-                      description={<Space size={4} wrap>
-                        {a.username && <Text type="secondary">@{a.username}</Text>}
-                        <Tag color={a.status === 'active' ? 'green' : 'red'}>{a.status}</Tag>
-                      </Space>}
-                    />
-                  </List.Item>
-                )}
-              />
-              <Button type="primary" block style={{ marginTop: 12 }} disabled={!st?.configured} onClick={() => connect(p)}>
-                {mine.length ? 'Connect another account' : `Connect ${PLATFORM_LABEL[p]}`}
-              </Button>
-            </Card>
-          </Col>
-        )
-      })}
-    </Row>
   )
 }
 
@@ -320,6 +254,8 @@ const PublishingPage: React.FC = () => {
   const clipId = routeClip || params.get('clip') || undefined
   const [tab, setTab] = useState<string>(params.get('tab') || (params.get('oauth') ? 'accounts' : 'compose'))
   const [status, setStatus] = useState<SocialStatus>()
+  const [setupFocus, setSetupFocus] = useState<Platform | undefined>((params.get('setup') as Platform) || undefined)
+  const openApps = (p: Platform) => { setSetupFocus(p); setTab('apps') }
   const [accounts, setAccounts] = useState<SocialAccount[]>([])
   const [jobs, setJobs] = useState<PublishJob[]>([])
 
@@ -337,10 +273,20 @@ const PublishingPage: React.FC = () => {
     return () => clearInterval(t)
   }, [jobs])
   useEffect(() => {
+    const setup = params.get('setup') as Platform | null
+    const t = params.get('tab')
+    if (setup) setSetupFocus(setup)
+    if (t) setTab(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search])
+  useEffect(() => {
     const oauth = params.get('oauth')
     if (!oauth) return
-    if (params.get('result') === 'connected') message.success(`${PLATFORM_LABEL[oauth as Platform] || oauth} connected`)
-    else message.error(`Could not connect ${oauth}: ${params.get('message') || 'unknown error'}`)
+    const name = oauth === 'youtube' ? 'YouTube' : (PLATFORM_LABEL[oauth as Platform] || oauth)
+    const n = Number(params.get('count') || 1)
+    if (params.get('result') === 'connected') message.success(n > 1 ? `${name}: ${n} accounts connected` : `${name} account connected`, 5)
+    else message.error(`Could not connect ${name}: ${params.get('message') || 'unknown error'}`, 10)
+    setTab('accounts')
     navigate('/publishing?tab=accounts', { replace: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -367,19 +313,37 @@ const PublishingPage: React.FC = () => {
           <span>Failed <b style={{ color: counts.failed ? '#cf1322' : undefined }}>{counts.failed}</b></span>
         </Space>
       </header>
-      {status && configured < 3 && (
-        <Alert style={{ marginTop: 16 }} type="info" showIcon
-          message={`${configured} of 3 platform apps configured`}
-          description="Each platform needs its own developer app (client ID and secret) in the server .env before accounts can connect. See docs/SOCIAL_PUBLISHING_SETUP.md in the repository." />
-      )}
+      <Card style={{ marginTop: 16 }} data-testid="connect-strip">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+          <div>
+            <Text strong>Connect your accounts</Text>
+            <div><Text type="secondary" style={{ fontSize: 13 }}>
+              {accounts.length ? `${accounts.length} connected · ` : ''}One click: you sign in on the platform's own page and AutoClip never sees your password.
+            </Text></div>
+          </div>
+          <div className="ac-connect-strip">
+            {(['tiktok', 'instagram', 'youtube'] as Platform[]).map((p) => (
+              <BrandLoginButton key={p} platform={p} size="middle"
+                configured={!!status?.platforms.find((x) => x.platform === p)?.configured}
+                onNavigate={() => setTab('apps')} />
+            ))}
+          </div>
+        </div>
+        {status && configured < 3 && (
+          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 10 }}>
+            {configured} of 3 platform apps configured. Buttons marked "Set up" open <a onClick={() => setTab('apps')}>Developer apps</a> to add that platform's keys first.
+          </Text>
+        )}
+      </Card>
       {status && !status.token_encryption && (
         <Alert style={{ marginTop: 12 }} type="error" showIcon message="SOCIAL_TOKEN_KEY is not set: tokens cannot be stored." />
       )}
       <Tabs style={{ marginTop: 16 }} activeKey={tab} onChange={(k) => { setTab(k); void reload() }} items={[
         { key: 'compose', label: 'Compose', children: <ComposePanel accounts={accounts} projectId={projectId} clipId={clipId} onQueued={() => { setTab('queue'); void reload() }} /> },
         { key: 'queue', label: `Queue (${jobs.length})`, children: <QueuePanel jobs={jobs} accounts={accounts} reload={reload} /> },
-        { key: 'accounts', label: `Accounts (${accounts.length})`, children: <AccountsPanel status={status} accounts={accounts} reload={reload} /> },
+        { key: 'accounts', label: `Accounts (${accounts.length})`, children: <AccountsPanel status={status} accounts={accounts} reload={reload} openApps={openApps} /> },
         { key: 'automation', label: 'Automation', children: <AutomationPanel accounts={accounts} /> },
+        { key: 'apps', label: 'Developer apps', children: <DeveloperAppsPanel focus={setupFocus} onChanged={() => void reload()} /> },
       ]} />
       {counts.active > 0 && <Progress percent={100} status="active" showInfo={false} style={{ marginTop: 8 }} />}
     </div>

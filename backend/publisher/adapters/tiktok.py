@@ -11,6 +11,7 @@ import os
 import time
 from urllib.parse import urlencode
 
+from .. import config
 from .base import AdapterError, BaseAdapter, ConnectedProfile, PublishContext, PublishResult, TokenBundle
 
 AUTH_URL = "https://www.tiktok.com/v2/auth/authorize/"
@@ -45,6 +46,16 @@ def _scopes() -> str:
 
 class TikTokAdapter(BaseAdapter):
     platform = "tiktok"
+    supports_revoke = True
+
+    @property
+    def pkce_style(self) -> str | None:  # type: ignore[override]
+        # TikTok's PKCE uses a hex-encoded SHA-256 challenge (not base64url); TIKTOK_PKCE=false turns it off.
+        return "hex" if config.tiktok_pkce() else None
+
+    @property
+    def uses_pkce(self) -> bool:
+        return self.pkce_style is not None
 
     def _check(self, resp, what: str) -> dict:
         try:
@@ -63,10 +74,14 @@ class TikTokAdapter(BaseAdapter):
 
     def authorize_url(self, state: str, code_challenge: str | None) -> str:
         self.require_configured()
-        return AUTH_URL + "?" + urlencode({
+        params = {
             "client_key": self.creds.client_id, "scope": _scopes(), "response_type": "code",
             "redirect_uri": self.redirect_uri, "state": state,
-        })
+            "disable_auto_auth": "1",  # always show the consent page, so another account can be picked
+        }
+        if code_challenge and self.uses_pkce:
+            params.update(code_challenge=code_challenge, code_challenge_method="S256")
+        return AUTH_URL + "?" + urlencode(params)
 
     def _token(self, data: dict) -> TokenBundle:
         resp = self.request("POST", f"{API}/oauth/token/", "token", data={
@@ -89,7 +104,10 @@ class TikTokAdapter(BaseAdapter):
 
     def exchange_code(self, code, code_verifier):
         self.require_configured()
-        token = self._token({"code": code, "grant_type": "authorization_code", "redirect_uri": self.redirect_uri})
+        data = {"code": code, "grant_type": "authorization_code", "redirect_uri": self.redirect_uri}
+        if code_verifier and self.uses_pkce:
+            data["code_verifier"] = code_verifier
+        token = self._token(data)
         fields = "open_id,union_id,avatar_url,display_name"
         if "user.info.profile" in token.scopes:
             fields += ",username"

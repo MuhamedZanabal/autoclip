@@ -70,7 +70,8 @@ def session():
 def ensure_tables() -> None:
     from backend.core.database import engine
     from backend.models.social import SocialAccount, SocialOAuthState, SocialPublishJob, SocialSetting
-    for model in (SocialAccount, SocialPublishJob, SocialOAuthState, SocialSetting):
+    from backend.models.social import SocialAppCredential
+    for model in (SocialAccount, SocialPublishJob, SocialOAuthState, SocialSetting, SocialAppCredential):
         model.__table__.create(bind=engine, checkfirst=True)
 
 
@@ -122,31 +123,46 @@ def save_settings(patch: dict) -> dict:
 
 
 # ------------------------------------------------------------------ OAuth ---
+def pkce_pair(style: str | None) -> tuple[str, str | None]:
+    """(code_verifier, code_challenge). Verifier: 86 chars from the RFC 7636 unreserved set."""
+    verifier = secrets.token_urlsafe(64)[:86]
+    if style == "hex":
+        return verifier, hashlib.sha256(verifier.encode()).hexdigest()
+    if style == "b64":
+        return verifier, base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
+    return verifier, None
+
+
 def start_oauth(platform: str) -> str:
     from backend.models.social import SocialOAuthState
+    if platform not in config.PLATFORMS:
+        raise ValueError("unknown platform")
     status = config.platform_status(platform)
     if not status["configured"]:
         raise AdapterError(f"{platform} is not configured: missing {', '.join(status['missing_env'])}", code="not_configured")
+    adapter = get_adapter(platform)
     state = secrets.token_urlsafe(32)
-    verifier = secrets.token_urlsafe(64)[:96]
-    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
+    verifier, challenge = pkce_pair(adapter.pkce_style)
     with session() as db:
         db.query(SocialOAuthState).filter(SocialOAuthState.created_at < utcnow() - STATE_TTL).delete()
-        db.add(SocialOAuthState(state=state, platform=platform, code_verifier=verifier, created_at=utcnow(), used=False))
+        db.add(SocialOAuthState(state=state, platform=platform, code_verifier=verifier if challenge else None,
+                                created_at=utcnow(), used=False))
         db.commit()
-    return get_adapter(platform).authorize_url(state, challenge if platform == "youtube" else None)
+    return adapter.authorize_url(state, challenge)
 
 
 def finish_oauth(platform: str, code: str, state: str) -> list[dict]:
     from backend.models.social import SocialAccount, SocialOAuthState
     with session() as db:
         row = db.get(SocialOAuthState, state)
-        if (row is None or row.used or row.platform != platform
-                or naive(row.created_at) < utcnow() - STATE_TTL):
+        valid = (row is not None and not row.used and row.platform == platform
+                 and naive(row.created_at) >= utcnow() - STATE_TTL)
+        if row is not None:
+            row.used = True  # any presentation burns the state, valid or not
+            db.commit()
+        if not valid:
             raise AdapterError("OAuth state is invalid or expired; start the connection again", code="bad_state")
-        row.used = True
         verifier = row.code_verifier
-        db.commit()
     adapter = get_adapter(platform)
     token, profiles = adapter.exchange_code(code, verifier)
     saved = []
@@ -181,10 +197,13 @@ def disconnect(account_id: str, revoke: bool = True) -> dict:
         acct = db.get(SocialAccount, account_id)
         if acct is None:
             raise FileNotFoundError("account not found")
-        revoked = False
-        if revoke:
+        revoked: Any = False
+        adapter = get_adapter(acct.platform)
+        if revoke and not adapter.supports_revoke:
+            revoked = "unsupported"
+        elif revoke:
             try:
-                get_adapter(acct.platform).revoke(TokenBundle.from_dict(crypto.decrypt_json(acct.token_encrypted)))
+                adapter.revoke(TokenBundle.from_dict(crypto.decrypt_json(acct.token_encrypted)))
                 revoked = True
             except Exception as exc:  # noqa: BLE001 - disconnect must still succeed locally
                 logger.warning("token revoke failed for %s: %s", acct.platform, type(exc).__name__)

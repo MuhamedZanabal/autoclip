@@ -7,16 +7,15 @@ Everything else stays behind the existing /autoclip/ basic auth.
 """
 from __future__ import annotations
 
-import html
 import logging
 from typing import Any, Optional
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
-from . import config, media, service
+from . import apps, config, media, service
 from .adapters import AdapterError
 
 logger = logging.getLogger(__name__)
@@ -70,17 +69,12 @@ def oauth_start(platform: str, redirect: bool = Query(True)):
 
 
 def _not_configured(platform: str, redirect: bool):
+    """Not configured yet: send the browser to the Developer apps screen instead of failing."""
     st = config.platform_status(platform)
+    setup_url = config.ui_url(f"/publishing?tab=apps&setup={platform}")
     if not redirect:
-        return {"configured": False, **st}
-    missing = ", ".join(html.escape(m) for m in st["missing_env"])
-    return HTMLResponse(status_code=409, content=(
-        f"<!doctype html><meta charset=utf-8><title>{platform} not configured</title>"
-        f"<body style='font-family:system-ui;max-width:640px;margin:40px auto;line-height:1.5'>"
-        f"<h2>{html.escape(platform.title())} is not configured yet</h2>"
-        f"<p>Add these to the server <code>.env</code> and restart AutoClip: <b>{missing}</b></p>"
-        f"<p>Register this exact redirect URI in the developer app:<br><code>{html.escape(st['redirect_uri'])}</code></p>"
-        f"<p>See <code>docs/SOCIAL_PUBLISHING_SETUP.md</code>. <a href='{html.escape(config.ui_url())}'>Back to Publishing</a></p>"))
+        return JSONResponse(status_code=409, content={"configured": False, "setup_url": setup_url, **st})
+    return RedirectResponse(setup_url, status_code=302)
 
 
 @router.get("/oauth/{platform}/callback")
@@ -88,16 +82,49 @@ def oauth_callback(platform: str, code: Optional[str] = None, state: Optional[st
                    error: Optional[str] = None, error_description: Optional[str] = None):
     if platform not in config.PLATFORMS:
         raise HTTPException(404, "unknown platform")
-    back = config.ui_url("/publishing")
+    back = config.ui_url("/publishing")  # the UI reads ?oauth=&result= and opens the Accounts tab
     if error or not code or not state:
         msg = error_description or error or "missing code"
-        return RedirectResponse(f"{back}?oauth={platform}&result=error&message={quote(msg[:200])}", status_code=302)
+        return RedirectResponse(f"{back}?oauth={platform}&tab=accounts&result=error&message={quote(msg[:200])}", status_code=302)
     try:
         accounts = service.finish_oauth(platform, code, state)
     except Exception as exc:  # noqa: BLE001
         logger.warning("OAuth callback for %s failed: %s", platform, str(exc)[:300])
-        return RedirectResponse(f"{back}?oauth={platform}&result=error&message={quote(str(exc)[:200])}", status_code=302)
-    return RedirectResponse(f"{back}?oauth={platform}&result=connected&count={len(accounts)}", status_code=302)
+        return RedirectResponse(f"{back}?oauth={platform}&tab=accounts&result=error&message={quote(str(exc)[:200])}", status_code=302)
+    return RedirectResponse(f"{back}?oauth={platform}&tab=accounts&result=connected&count={len(accounts)}", status_code=302)
+
+
+# ---------------------------------------------------- developer apps ---
+class AppCredentialsBody(BaseModel):
+    client_id: str = Field(..., min_length=1, max_length=256)
+    client_secret: Optional[str] = Field(None, max_length=512)  # blank = keep the stored secret
+
+
+@router.get("/apps")
+def list_apps():
+    """Masked view of each platform's developer-app credentials. Secrets are never returned."""
+    service.ensure_tables()
+    return {"apps": [config.platform_status(p) for p in config.PLATFORMS],
+            "token_encryption": bool(config.token_key()), "public_url": config.public_base_url()}
+
+
+@router.put("/apps/{platform}")
+def save_app(platform: str, body: AppCredentialsBody):
+    if platform not in config.PLATFORMS:
+        raise HTTPException(404, "unknown platform")
+    try:
+        apps.save(platform, body.client_id, body.client_secret)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return config.platform_status(platform)
+
+
+@router.delete("/apps/{platform}")
+def delete_app(platform: str):
+    if platform not in config.PLATFORMS:
+        raise HTTPException(404, "unknown platform")
+    removed = apps.delete(platform)
+    return {"removed": removed, **config.platform_status(platform)}
 
 
 # -------------------------------------------------------------- accounts ---

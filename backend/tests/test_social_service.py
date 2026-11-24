@@ -13,6 +13,8 @@ from backend.publisher.adapters.base import ConnectedProfile
 
 class FakeAdapter:
     platform = "tiktok"
+    pkce_style = None
+    supports_revoke = True
     polls = 0
     fail_publish = None
 
@@ -56,7 +58,7 @@ def env(monkeypatch, tmp_path):
     from backend.core.database import engine, Base
     Base.metadata.create_all(bind=engine)
     with engine.begin() as conn:
-        for t in ("social_publish_jobs", "social_accounts", "social_oauth_states", "social_settings"):
+        for t in ("social_publish_jobs", "social_accounts", "social_oauth_states", "social_settings", "social_app_credentials"):
             conn.execute(text(f"DELETE FROM {t}"))
     clip = {"id": "clip1", "project_id": "p1", "title": "OpenAI strategy reset", "duration": 40, "start_time": 0,
             "end_time": 40, "description": "", "recommendation_reason": "", "clip_metadata": None,

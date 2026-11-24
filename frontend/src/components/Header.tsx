@@ -9,6 +9,7 @@ import { useTheme } from '../context/ThemeContext'
 import { UpdateToast, useAppUpdate } from '../desktop/UpdatePrompt'
 import { Icon } from '../ui'
 import { useKeepAwakeHeld } from '../features/studio/KeepAwakeGuard'
+import HeaderConnect from '../publish/HeaderConnect'
 
 const { Header: AntHeader } = Layout
 
@@ -113,6 +114,7 @@ const Header: React.FC = () => {
             background: 'var(--ac-card)',
           }}
         />
+        <HeaderConnect />
         <Button
           type="text"
           icon={<SendOutlined />}

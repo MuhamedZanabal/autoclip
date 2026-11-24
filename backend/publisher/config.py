@@ -59,16 +59,61 @@ class AppCredentials:
         return bool(self.client_id and self.client_secret)
 
 
+ENV_NAMES = {
+    "tiktok": ("TIKTOK_CLIENT_KEY", "TIKTOK_CLIENT_SECRET"),
+    "instagram": ("INSTAGRAM_APP_ID", "INSTAGRAM_APP_SECRET"),
+    "instagram_facebook": ("META_APP_ID", "META_APP_SECRET"),
+    "youtube": ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"),
+}
+
+CONSOLES = {
+    "tiktok": {"console_url": "https://developers.tiktok.com/apps/",
+               "docs_url": "https://developers.tiktok.com/doc/content-posting-api-get-started",
+               "id_label": "Client key", "secret_label": "Client secret"},
+    "instagram": {"console_url": "https://developers.facebook.com/apps/",
+                  "docs_url": "https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login",
+                  "id_label": "Instagram app ID", "secret_label": "Instagram app secret"},
+    "youtube": {"console_url": "https://console.cloud.google.com/apis/credentials",
+                "docs_url": "https://developers.google.com/youtube/v3/guides/uploading_a_video",
+                "id_label": "OAuth client ID", "secret_label": "OAuth client secret"},
+}
+SETUP_GUIDE_URL = "https://github.com/MuhamedZanabal/autoclip/blob/zedosai-main/docs/SOCIAL_PUBLISHING_SETUP.md"
+
+
+def env_names(platform: str) -> tuple[str, str]:
+    if platform == "instagram" and instagram_login_mode() == "facebook":
+        return ENV_NAMES["instagram_facebook"]
+    if platform not in ENV_NAMES:
+        raise ValueError(f"unknown platform: {platform}")
+    return ENV_NAMES[platform]
+
+
+def env_credentials(platform: str) -> AppCredentials:
+    id_name, secret_name = env_names(platform)
+    return AppCredentials(_env(id_name), _env(secret_name))
+
+
+def credentials_source(platform: str) -> str | None:
+    """'env' when the server .env provides the pair (it always wins), 'db' when entered in the UI."""
+    env = env_credentials(platform)
+    if env.client_id or env.client_secret:
+        return "env" if env.configured else None
+    from . import apps
+    cid, sec = apps.stored(platform)
+    return "db" if cid and sec else None
+
+
 def credentials(platform: str) -> AppCredentials:
-    if platform == "tiktok":
-        return AppCredentials(_env("TIKTOK_CLIENT_KEY"), _env("TIKTOK_CLIENT_SECRET"))
-    if platform == "instagram":
-        if instagram_login_mode() == "facebook":
-            return AppCredentials(_env("META_APP_ID"), _env("META_APP_SECRET"))
-        return AppCredentials(_env("INSTAGRAM_APP_ID"), _env("INSTAGRAM_APP_SECRET"))
-    if platform == "youtube":
-        return AppCredentials(_env("GOOGLE_CLIENT_ID"), _env("GOOGLE_CLIENT_SECRET"))
-    raise ValueError(f"unknown platform: {platform}")
+    env = env_credentials(platform)
+    if env.client_id or env.client_secret:  # any .env value takes precedence over the UI store
+        return env
+    from . import apps
+    cid, sec = apps.stored(platform)
+    return AppCredentials(cid, sec)
+
+
+def tiktok_pkce() -> bool:
+    return _env("TIKTOK_PKCE", "true").lower() in ("1", "true", "yes")
 
 
 def token_key() -> str:
@@ -83,13 +128,9 @@ def media_url_ttl_sec() -> int:
 
 
 def missing_env(platform: str) -> list[str]:
-    names = {
-        "tiktok": ["TIKTOK_CLIENT_KEY", "TIKTOK_CLIENT_SECRET"],
-        "instagram": (["META_APP_ID", "META_APP_SECRET"] if instagram_login_mode() == "facebook"
-                      else ["INSTAGRAM_APP_ID", "INSTAGRAM_APP_SECRET"]),
-        "youtube": ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"],
-    }[platform]
-    missing = [n for n in names if not _env(n)]
+    missing = []
+    if not credentials(platform).configured:
+        missing.extend(n for n in env_names(platform) if not _env(n))
     if not token_key():
         missing.append("SOCIAL_TOKEN_KEY")
     if not _env("AUTOCLIP_PUBLIC_URL"):
@@ -98,11 +139,23 @@ def missing_env(platform: str) -> list[str]:
 
 
 def platform_status(platform: str) -> dict:
+    from . import apps
     missing = missing_env(platform)
+    creds = credentials(platform)
+    source = credentials_source(platform)
+    env = env_credentials(platform)
     return {
         "platform": platform,
         "configured": not missing,
         "missing_env": missing,
+        "source": source,
+        "env_locked": bool(env.client_id or env.client_secret),
+        "client_id_masked": apps.mask(creds.client_id),
+        "secret_set": bool(creds.client_secret),
+        "env_names": list(env_names(platform)),
         "redirect_uri": redirect_uri(platform),
+        "pkce": platform == "youtube" or (platform == "tiktok" and tiktok_pkce()),
+        "setup_guide_url": SETUP_GUIDE_URL,
+        **CONSOLES[platform],
         **({"login_mode": instagram_login_mode()} if platform == "instagram" else {}),
     }
