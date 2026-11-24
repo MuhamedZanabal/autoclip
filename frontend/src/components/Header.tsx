@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import React from 'react'
 import LanguageSelect from './LanguageSelect'
 import { Layout, Button } from 'antd'
-import { SettingOutlined, BulbOutlined, MoonOutlined } from '@ant-design/icons'
+import { SettingOutlined, BulbOutlined, MoonOutlined, SendOutlined } from '@ant-design/icons'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useTheme } from '../context/ThemeContext'
 import { UpdateToast, useAppUpdate } from '../desktop/UpdatePrompt'
@@ -18,6 +18,7 @@ const Header: React.FC = () => {
   const navigate = useNavigate()
   const location = useLocation()
   const isSettings = location.pathname === '/settings'
+  const isPublishing = location.pathname === '/publishing' || /\/publish/.test(location.pathname)
   const { theme, toggleTheme } = useTheme()
   const appUpdate = useAppUpdate()
   const updatePending = appUpdate.phase === 'downloading' || appUpdate.phase === 'ready' || appUpdate.phase === 'failed' || appUpdate.phase === 'restarting'
@@ -112,6 +113,21 @@ const Header: React.FC = () => {
             background: 'var(--ac-card)',
           }}
         />
+        <Button
+          type="text"
+          icon={<SendOutlined />}
+          onClick={() => navigate('/publishing')}
+          aria-current={isPublishing ? 'page' : undefined}
+          data-testid="nav-publishing"
+          style={{
+            color: isPublishing ? 'var(--ac-ink)' : 'var(--ac-sub)',
+            border: '1px solid var(--ac-line)',
+            borderRadius: '999px',
+            height: '36px',
+            padding: '0 16px',
+            background: isPublishing ? 'var(--ac-line-2)' : 'var(--ac-card)',
+          }}
+        >Publishing</Button>
         <Button
           type="text"
           icon={<SettingOutlined />}

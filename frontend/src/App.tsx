@@ -3,9 +3,7 @@ import { Routes, Route, useLocation } from 'react-router-dom'
 import { Layout } from 'antd'
 import HomePage from './pages/HomePage'
 import ProjectDetailPage from './pages/ProjectDetailPage'
-import PublishClipPage from './pages/PublishClipPage'
-import PublishListPage from './pages/PublishListPage'
-import PublishWeekPage from './pages/PublishWeekPage'
+import PublishingPage from './pages/PublishingPage'
 import ImportReview from './features/studio/ImportReview'
 import StudioEditor from './features/studio/StudioEditor'
 import SettingsPage from './pages/SettingsPage'
@@ -61,9 +59,11 @@ function App() {
             <Route path="/" element={<HomePage />} />
             <Route path="/import/:id" element={<ImportReview />} />
             <Route path="/project/:id/studio/:draftId" element={<StudioEditor />} />
-            <Route path="/project/:id/publish/week" element={<PublishWeekPage />} />
-            <Route path="/project/:id/publish/:clipId" element={<PublishClipPage />} />
-            <Route path="/project/:id/publish" element={<PublishListPage />} />
+            {/* Native publisher replaces the Upload-Post / Bilibili-cookie pages */}
+            <Route path="/publishing" element={<PublishingPage />} />
+            <Route path="/project/:id/publish/week" element={<PublishingPage />} />
+            <Route path="/project/:id/publish/:clipId" element={<PublishingPage />} />
+            <Route path="/project/:id/publish" element={<PublishingPage />} />
             <Route path="/project/:id" element={<ProjectDetailPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Routes>

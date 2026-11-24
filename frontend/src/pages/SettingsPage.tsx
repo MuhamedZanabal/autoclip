@@ -9,7 +9,6 @@ import AIModelSettings from '../features/settings/AIModelSettings'
 import OutputBrandingSetting from '../features/settings/OutputBrandingSetting'
 import OutputCaptionsSetting from '../features/settings/OutputCaptionsSetting'
 import FeedbackDialog from '../components/FeedbackDialog'
-import PublishSettings from '../components/PublishSettings'
 import { isDesktopMode } from '../utils/desktopMode'
 import { openExternalLink } from '../utils/externalLinks'
 import { isAnalyticsEnabled, setAnalyticsEnabled } from '../analytics/posthog'
@@ -105,7 +104,12 @@ const SettingsPage: React.FC = () => {
             <AppSection analyticsOn={analyticsOn} onAnalyticsChange={(on) => { setAnalyticsEnabled(on); setAnalyticsOn(on) }} />
           )}
 
-          {active === 'publish' && <PublishSettings />}
+          {active === 'publish' && (
+            <div style={{ padding: '8px 0' }}>
+              <p>Publishing now uses AutoClip's native publisher: connect TikTok, Instagram and YouTube with their official sign-in, then post or auto-publish with SEO captions.</p>
+              <a href="#/publishing?tab=accounts">Open Publishing → Accounts</a>
+            </div>
+          )}
 
           {/* ---------------- 反馈 ---------------- */}
           {active === 'feedback' && (

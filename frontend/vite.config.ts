@@ -42,6 +42,8 @@ export default defineConfig(({ mode, command }) => {
     ],
     define: {
       'import.meta.env.VITE_APP_VERSION': JSON.stringify(appVersion),
+      // Path-prefixed web deployments (e.g. /autoclip/api/v1 behind nginx); default keeps upstream behaviour.
+      __AUTOCLIP_API_BASE__: JSON.stringify(env.VITE_API_BASE || '/api/v1'),
     },
     base: isProduction ? './' : '/', // 生产环境使用相对路径
     optimizeDeps: {

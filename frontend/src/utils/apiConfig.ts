@@ -12,7 +12,8 @@ interface ApiConfig {
 class ApiConfigManager {
   private static instance: ApiConfigManager;
   private config: ApiConfig = {
-    baseUrl: '/autoclip/api/v1',
+    // Web deployments behind a path prefix (e.g. https://zedosai.com/autoclip/) set VITE_API_BASE at build time.
+    baseUrl: (typeof __AUTOCLIP_API_BASE__ !== 'undefined' && __AUTOCLIP_API_BASE__) || '/api/v1',
     port: 0,
     isReady: false
   };

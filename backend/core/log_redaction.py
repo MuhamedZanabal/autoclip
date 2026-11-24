@@ -61,6 +61,13 @@ class RedactingFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         if getattr(record, "_autoclip_redacted", False):
             return True
+        if record.name == "uvicorn.access" and isinstance(record.args, tuple) and len(record.args) == 5:
+            # uvicorn's AccessFormatter unpacks exactly 5 args (client, method, path, version, status).
+            # Collapsing args to () made every access line raise "not enough values to unpack";
+            # redact each string arg in place instead (the path carries query strings / signed URLs).
+            record.args = tuple(redact_text(a) if isinstance(a, str) else a for a in record.args)
+            record._autoclip_redacted = True
+            return True
         try:
             message = record.getMessage()
         except Exception:  # noqa: BLE001 - bad format args; fall back to raw msg
