@@ -1,0 +1,78 @@
+services:
+  redis:
+    ports: !override []
+    restart: unless-stopped
+
+  autoclip:
+    ports: !override
+      - "127.0.0.1:8030:8000"
+    networks:
+      - default
+      - zanabot-link
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+
+  celery-worker:
+    networks:
+      - default
+      - zanabot-link
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import redis,os; redis.Redis.from_url(os.environ['REDIS_URL']).ping(); print('ok')\"",
+        ]
+      interval: 60s
+      timeout: 15s
+      retries: 5
+      start_period: 60s
+
+  celery-beat:
+    healthcheck:
+      disable: true
+
+  flower:
+    profiles: ["monitoring"]
+    ports: !override
+      - "127.0.0.1:5555:5555"
+
+  # Serve built SPA (production image has dist; stock compose only runs uvicorn)
+  autoclip-web:
+    image: autoclip:local
+    container_name: autoclip-web
+    restart: unless-stopped
+    user: "0:0"
+    entrypoint:
+      [
+        "python",
+        "-m",
+        "http.server",
+        "3000",
+        "--bind",
+        "0.0.0.0",
+        "--directory",
+        "/app/frontend/dist",
+      ]
+    ports:
+      - "127.0.0.1:3030:3000"
+    depends_on:
+      autoclip:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:3000/')\"",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  zanabot-link:
+    external: true

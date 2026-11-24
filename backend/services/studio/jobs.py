@@ -462,7 +462,7 @@ INSPECT_SOCKET_TIMEOUT = 8
 
 def inspect_url(url, browser=None):
     """yt-dlp info-only probe before download (F4). Returns metadata for the import preview card."""
-    from backend.utils.ffmpeg_utils import get_ffmpeg_path, ytdlp_js_runtimes
+    from backend.utils.ffmpeg_utils import get_ffmpeg_path, ytdlp_js_runtimes, ytdlp_cookie_options
     from backend.utils.download_recovery import extract_info_with_recovery
     options = {
         'skip_download': True,
@@ -472,6 +472,7 @@ def inspect_url(url, browser=None):
         'writesubtitles': False,
         'writeautomaticsub': False,
         **ytdlp_js_runtimes(),
+        **ytdlp_cookie_options(),
         # Bound the worker so asyncio.wait_for(10) does not leave yt-dlp running for 30s+.
         'socket_timeout': INSPECT_SOCKET_TIMEOUT,
         'retries': 0,
@@ -500,11 +501,11 @@ def inspect_url(url, browser=None):
 
 
 def download(project_id, url, browser, import_options=None):
-    from backend.utils.ffmpeg_utils import get_ffmpeg_path, ytdlp_js_runtimes
+    from backend.utils.ffmpeg_utils import get_ffmpeg_path, ytdlp_js_runtimes, ytdlp_cookie_options
     folder = store.directory(project_id) / 'raw'
     folder.mkdir(exist_ok=True)
     progress = download_progress_hook(project_id)
-    options = {'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]', 'outtmpl': str(folder / 'input.%(ext)s'), 'merge_output_format': 'mp4', 'noplaylist': True, 'quiet': True, 'ffmpeg_location': get_ffmpeg_path(), 'socket_timeout': 30, 'retries': 2, 'progress_hooks': [progress], 'postprocessor_hooks': [progress], **ytdlp_js_runtimes()}
+    options = {'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]', 'outtmpl': str(folder / 'input.%(ext)s'), 'merge_output_format': 'mp4', 'noplaylist': True, 'quiet': True, 'ffmpeg_location': get_ffmpeg_path(), 'socket_timeout': 30, 'retries': 2, 'progress_hooks': [progress], 'postprocessor_hooks': [progress], **ytdlp_js_runtimes(), **ytdlp_cookie_options()}
     if browser:
         options['cookiesfrombrowser'] = (browser,)
     from backend.utils.download_recovery import download_with_recovery

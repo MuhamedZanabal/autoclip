@@ -149,6 +149,27 @@ _JS_RUNTIME_BINARIES = {
 }
 
 
+
+
+def ytdlp_cookie_options() -> dict:
+    """Server cookie jar for YouTube/Bilibili when the OCI IP is bot-blocked.
+
+    Drop a Netscape cookies.txt at /app/data/cookies/cookies.txt (or youtube.txt).
+    Desktop "cookies from browser" cannot see the operator's PC from this container.
+    """
+    for candidate in (
+        Path("/app/data/cookies/cookies.txt"),
+        Path("/app/data/cookies/youtube.txt"),
+        Path("/app/data/cookies/bilibili.txt"),
+    ):
+        try:
+            if candidate.is_file() and candidate.stat().st_size > 32:
+                return {"cookiefile": str(candidate)}
+        except OSError:
+            continue
+    return {}
+
+
 def ytdlp_js_runtimes() -> dict:
     """YouTube 现在要先解 JS 校验（yt-dlp-ejs）才能拿到视频流。
 
@@ -180,6 +201,7 @@ def ytdlp_ffmpeg_options() -> dict:
     只有解析到真实文件时才传，否则交给 yt-dlp 自己找。
     """
     options = ytdlp_js_runtimes()
+    options.update(ytdlp_cookie_options())
     path = get_ffmpeg_path()
     if os.path.isabs(path) and os.path.exists(path):
         options["ffmpeg_location"] = path

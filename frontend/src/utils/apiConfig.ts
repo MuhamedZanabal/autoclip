@@ -12,7 +12,7 @@ interface ApiConfig {
 class ApiConfigManager {
   private static instance: ApiConfigManager;
   private config: ApiConfig = {
-    baseUrl: '/api/v1',
+    baseUrl: '/autoclip/api/v1',
     port: 0,
     isReady: false
   };

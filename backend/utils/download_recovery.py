@@ -84,6 +84,12 @@ def recovery_options(options: dict) -> dict:
     budget so a timed-out probe does not keep a threadpool worker forever).
     """
     opts = dict(options)
+    if not opts.get('cookiefile') and not opts.get('cookiesfrombrowser'):
+        try:
+            from backend.utils.ffmpeg_utils import ytdlp_cookie_options
+            opts.update(ytdlp_cookie_options())
+        except Exception:
+            pass
     opts.setdefault('socket_timeout', 30)
     opts.setdefault('retries', 2)
     opts.setdefault('fragment_retries', 2)
