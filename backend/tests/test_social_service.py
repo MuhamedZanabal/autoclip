@@ -78,6 +78,12 @@ def _connect():
     return state, service.finish_oauth("tiktok", "code", state)
 
 
+TT_OPTS = {"tiktok": {"privacy_level": "SELF_ONLY", "tiktok_consent": True,
+                      "disable_comment": True, "disable_duet": True, "disable_stitch": True}}
+
+
+
+
 def test_oauth_state_is_single_use_and_token_encrypted(env):
     state, accounts = _connect()
     assert accounts[0]["username"] == "me" and accounts[0]["platform"] == "tiktok"
@@ -93,7 +99,7 @@ def test_oauth_state_is_single_use_and_token_encrypted(env):
 
 def test_queue_publish_poll_with_safe_retry(env):
     _, accounts = _connect()
-    jobs = service.create_jobs("clip1", [{"account_id": accounts[0]["id"], "target": "tiktok"}])
+    jobs = service.create_jobs("clip1", [{"account_id": accounts[0]["id"], "target": "tiktok"}], options=TT_OPTS)
     job = jobs[0]
     assert job["status"] == "queued" and job["caption"]["caption"] and job["seo_report"]["source"] == "heuristic"
     out = service.process_job(job["id"])
@@ -107,7 +113,7 @@ def test_queue_publish_poll_with_safe_retry(env):
 
 def test_retry_backoff_then_fail(env):
     _, accounts = _connect()
-    job = service.create_jobs("clip1", [{"account_id": accounts[0]["id"], "target": "tiktok"}])[0]
+    job = service.create_jobs("clip1", [{"account_id": accounts[0]["id"], "target": "tiktok"}], options=TT_OPTS)[0]
     FakeAdapter.fail_publish = AdapterError("rate limited", retryable=True)
     out = service.process_job(job["id"])
     assert out["status"] == "queued" and out["attempts"] == 1 and out["next_attempt_at"]
@@ -126,7 +132,7 @@ def test_draft_approval_and_caption_edit(env):
     assert job["status"] == "draft" and service.due_job_ids() == []
     edited = service.update_job(job["id"], {"caption": {"caption": "OpenAI strategy explained #AI #OpenAI #Tech"}})
     assert edited["caption"]["caption"].startswith("OpenAI strategy") and edited["seo_report"]["source"] == "edited"
-    approved = service.update_job(job["id"], {"action": "approve"})
+    approved = service.update_job(job["id"], {"action": "approve", "options": TT_OPTS["tiktok"]})
     assert approved["status"] == "queued" and service.due_job_ids() == [job["id"]]
 
 
@@ -140,6 +146,8 @@ def test_auto_publish_scan_only_new_clips(env, monkeypatch):
     monkeypatch.setattr(service.media, "_rows", lambda sql, **kw: rows)
     created = service.auto_publish_scan()
     assert len(created) == 1 and created[0]["source"] == "auto"
+    assert created[0]["status"] == "draft"  # TikTok auto jobs require the per-post form
+    assert "privacy_level" not in (created[0]["options"] or {})
     assert service.auto_publish_scan() == []  # idempotent per clip+account+target
 
 
@@ -148,3 +156,22 @@ def test_disconnect_cancels_pending(env):
     job = service.create_jobs("clip1", [{"account_id": accounts[0]["id"], "target": "tiktok"}], draft=True)[0]
     res = service.disconnect(accounts[0]["id"])
     assert res["cancelled_jobs"] == 1 and service.list_accounts() == []
+
+def test_tiktok_process_without_consent_returns_to_draft(env):
+    _, accounts = _connect()
+    job = service.create_jobs("clip1", [{"account_id": accounts[0]["id"], "target": "tiktok"}])[0]
+    assert job["status"] == "queued" and not job["options"].get("tiktok_consent")
+    out = service.process_job(job["id"])
+    assert out["status"] == "draft"
+    assert "privacy" in (out["error"] or "").lower() or "Music Usage Confirmation" in (out["error"] or "")
+    assert service.due_job_ids() == []
+
+
+def test_tiktok_approve_requires_privacy_and_consent(env):
+    _, accounts = _connect()
+    job = service.create_jobs("clip1", [{"account_id": accounts[0]["id"], "target": "tiktok"}], draft=True)[0]
+    with pytest.raises(ValueError, match="privacy"):
+        service.update_job(job["id"], {"action": "approve"})
+    approved = service.update_job(job["id"], {"action": "approve", "options": TT_OPTS["tiktok"]})
+    assert approved["status"] == "queued"
+

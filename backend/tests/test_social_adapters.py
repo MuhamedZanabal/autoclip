@@ -9,7 +9,9 @@ import pytest
 from backend.publisher import crypto
 from backend.publisher.adapters import AdapterError, PublishContext, TokenBundle
 from backend.publisher.adapters.instagram import InstagramAdapter
-from backend.publisher.adapters.tiktok import TikTokAdapter, chunk_plan
+from backend.publisher.adapters.tiktok import (
+    TikTokAdapter, chunk_plan, options_block_reason, options_ready,
+)
 from backend.publisher.adapters.youtube import YouTubeAdapter
 
 
@@ -30,11 +32,11 @@ def video(tmp_path: Path, size=1000) -> Path:
     return p
 
 
-def ctx(tmp_path, target, **kw):
+def ctx(tmp_path, target, options=None, **kw):
     return PublishContext(token=TokenBundle("tok", "ref", time.time() + 3600), account_external_id="acct",
                           account_username="me", target=target, video_path=video(tmp_path),
                           caption={"caption": "Hello #AI", "title": "Title", "description": "Desc", "tags": ["a"]},
-                          options={}, duration_sec=30, **kw)
+                          options=options or {}, duration_sec=30, **kw)
 
 
 def test_chunk_plan():
@@ -50,6 +52,11 @@ def test_tiktok_privacy_rules():
     assert TikTokAdapter.choose_privacy("FOLLOWER_OF_CREATOR", ["FOLLOWER_OF_CREATOR"], True)[0] == "FOLLOWER_OF_CREATOR"
     with pytest.raises(AdapterError):
         TikTokAdapter.choose_privacy("PUBLIC_TO_EVERYONE", ["SELF_ONLY"], True)
+    with pytest.raises(AdapterError) as ei:
+        TikTokAdapter.choose_privacy(None, ["PUBLIC_TO_EVERYONE", "SELF_ONLY"], True)
+    assert ei.value.code == "privacy_required"
+    with pytest.raises(AdapterError):
+        TikTokAdapter.choose_privacy("", ["PUBLIC_TO_EVERYONE"], True)
 
 
 def test_tiktok_publish_and_poll(tmp_path):
@@ -63,6 +70,10 @@ def test_tiktok_publish_and_poll(tmp_path):
         if req.url.path.endswith("/video/init/"):
             body = json.loads(req.content)
             assert body["post_info"]["privacy_level"] == "SELF_ONLY"
+            assert body["post_info"]["disable_comment"] is True
+            assert body["post_info"]["disable_duet"] is True
+            assert body["post_info"]["disable_stitch"] is True
+            assert body["post_info"]["brand_content_toggle"] is False
             assert body["source_info"] == {"source": "FILE_UPLOAD", "video_size": 1000, "chunk_size": 1000, "total_chunk_count": 1}
             return httpx.Response(200, json={"data": {"publish_id": "p1", "upload_url": "https://upload.test/u?x=1"},
                                              "error": {"code": "ok"}})
@@ -75,7 +86,7 @@ def test_tiktok_publish_and_poll(tmp_path):
         raise AssertionError(req.url)
 
     ad = TikTokAdapter(client=httpx.Client(transport=httpx.MockTransport(handler)))
-    c = ctx(tmp_path, "tiktok")
+    c = ctx(tmp_path, "tiktok", options={"privacy_level": "PUBLIC_TO_EVERYONE", "tiktok_consent": True})
     res = ad.publish(c)
     assert res.status == "processing" and res.remote_id == "p1" and "private" in res.note
     c.remote_id = "p1"
@@ -88,7 +99,7 @@ def test_tiktok_token_error_maps_to_reconnect(tmp_path):
         return httpx.Response(401, json={"error": {"code": "access_token_invalid", "message": "bad"}})
     ad = TikTokAdapter(client=httpx.Client(transport=httpx.MockTransport(handler)))
     with pytest.raises(AdapterError) as ei:
-        ad.publish(ctx(tmp_path, "tiktok"))
+        ad.publish(ctx(tmp_path, "tiktok", options={"privacy_level": "SELF_ONLY", "tiktok_consent": True}))
     assert ei.value.needs_reconnect
 
 
@@ -158,3 +169,51 @@ def test_not_configured(monkeypatch):
     with pytest.raises(AdapterError) as ei:
         TikTokAdapter().authorize_url("s", None)
     assert ei.value.code == "not_configured"
+
+def test_tiktok_options_ready():
+    assert options_block_reason({}) == "Select a privacy level. TikTok requires a manual choice with no default."
+    assert not options_ready({"privacy_level": "SELF_ONLY"})
+    assert options_ready({"privacy_level": "SELF_ONLY", "tiktok_consent": True})
+    assert options_block_reason({
+        "privacy_level": "SELF_ONLY", "tiktok_consent": True,
+        "commercial_disclosure": True,
+    }).startswith("You need to indicate")
+    assert options_block_reason({
+        "privacy_level": "SELF_ONLY", "tiktok_consent": True, "brand_content_toggle": True,
+    }) == "Branded content visibility cannot be set to private."
+    assert options_ready({
+        "privacy_level": "PUBLIC_TO_EVERYONE", "tiktok_consent": True, "brand_content_toggle": True,
+    })
+
+
+def test_tiktok_publish_requires_consent(tmp_path):
+    ad = TikTokAdapter(client=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(500))))
+    with pytest.raises(AdapterError) as ei:
+        ad.publish(ctx(tmp_path, "tiktok", options={"privacy_level": "SELF_ONLY"}))
+    assert ei.value.code == "tiktok_ux"
+
+
+def test_tiktok_creator_info_posting_cap(tmp_path):
+    def handler(req):
+        return httpx.Response(200, json={"data": {}, "error": {
+            "code": "spam_risk_too_many_posts", "message": "cap",
+        }})
+    ad = TikTokAdapter(client=httpx.Client(transport=httpx.MockTransport(handler)))
+    result = ad.query_creator_info(TokenBundle("tok", "ref", time.time() + 3600))
+    assert result["can_post"] is False and result["error_code"] == "spam_risk_too_many_posts"
+    with pytest.raises(AdapterError) as ei:
+        ad.creator_info(TokenBundle("tok", "ref", time.time() + 3600))
+    assert ei.value.code == "spam_risk_too_many_posts"
+
+
+def test_tiktok_rejects_overlong_video(tmp_path):
+    def handler(req):
+        if req.url.path.endswith("/creator_info/query/"):
+            return httpx.Response(200, json={"data": {"privacy_level_options": ["SELF_ONLY"],
+                                                      "max_video_post_duration_sec": 10}, "error": {"code": "ok"}})
+        raise AssertionError(req.url)
+    ad = TikTokAdapter(client=httpx.Client(transport=httpx.MockTransport(handler)))
+    with pytest.raises(AdapterError) as ei:
+        ad.publish(ctx(tmp_path, "tiktok", options={"privacy_level": "SELF_ONLY", "tiktok_consent": True}))
+    assert "10s max" in str(ei.value)
+

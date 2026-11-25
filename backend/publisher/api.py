@@ -142,6 +142,15 @@ def disconnect(account_id: str, revoke: bool = True):
         raise _err(exc)
 
 
+@router.get("/accounts/{account_id}/creator-info")
+def creator_info(account_id: str):
+    """Live TikTok creator_info used to render the Post to TikTok form."""
+    try:
+        return service.query_tiktok_creator(account_id)
+    except Exception as exc:  # noqa: BLE001
+        raise _err(exc)
+
+
 # -------------------------------------------------------------- settings ---
 @router.get("/settings")
 def get_settings():

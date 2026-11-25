@@ -35,8 +35,11 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "brand_hashtags": [],
     "burn_subtitles": True,
     "defaults": {
-        "tiktok": {"privacy_level": "PUBLIC_TO_EVERYONE", "disable_comment": False, "disable_duet": False,
-                   "disable_stitch": False, "is_aigc": False},
+        # No default privacy_level: TikTok requires a manual per-post choice.
+        # Interactions default off (disable_*=True) until the user turns them on.
+        "tiktok": {"disable_comment": True, "disable_duet": True,
+                   "disable_stitch": True, "is_aigc": False,
+                   "brand_content_toggle": False, "brand_organic_toggle": False},
         "instagram": {"share_to_feed": True},
         "youtube_shorts": {"privacy_status": "public", "made_for_kids": False},
         "youtube": {"privacy_status": "public", "made_for_kids": False},
@@ -191,6 +194,38 @@ def list_accounts() -> list[dict]:
         return [a.public() for a in db.query(SocialAccount).order_by(SocialAccount.platform, SocialAccount.created_at)]
 
 
+def query_tiktok_creator(account_id: str) -> dict:
+    """Latest TikTok creator_info used to render the Post to TikTok form."""
+    from backend.models.social import SocialAccount
+    from .adapters.tiktok import TikTokAdapter, _audited
+    with session() as db:
+        acct = db.get(SocialAccount, account_id)
+        if acct is None:
+            raise FileNotFoundError("account not found")
+        if acct.platform != "tiktok":
+            raise ValueError("creator info is only available for TikTok accounts")
+        if acct.status != "active":
+            raise AdapterError(f"account needs attention: {acct.status}", needs_reconnect=True)
+        token = fresh_token(acct)
+        db.commit()
+        result = TikTokAdapter().query_creator_info(token)
+    data = result.get("data") or {}
+    return {
+        "can_post": result["can_post"],
+        "error_code": result.get("error_code"),
+        "error_message": result.get("error_message"),
+        "audited": _audited(),
+        "creator_nickname": data.get("creator_nickname"),
+        "creator_username": data.get("creator_username"),
+        "creator_avatar_url": data.get("creator_avatar_url"),
+        "privacy_level_options": data.get("privacy_level_options") or [],
+        "comment_disabled": bool(data.get("comment_disabled")),
+        "duet_disabled": bool(data.get("duet_disabled")),
+        "stitch_disabled": bool(data.get("stitch_disabled")),
+        "max_video_post_duration_sec": data.get("max_video_post_duration_sec"),
+    }
+
+
 def disconnect(account_id: str, revoke: bool = True) -> dict:
     from backend.models.social import SocialAccount, SocialPublishJob
     with session() as db:
@@ -287,12 +322,22 @@ def create_jobs(clip_id: str, targets: list[dict], *, captions: Optional[dict] =
             acct = db.get(SocialAccount, t.get("account_id"))
             if acct is None or config.TARGET_PLATFORM[target] != acct.platform:
                 raise ValueError(f"account {t.get('account_id')} cannot post as {target}")
+            base_opts = dict(settings["defaults"].get(target, {}) or {})
+            user_opts = dict((options or {}).get(target, {}) or {})
+            if target == "tiktok":
+                # Never inherit a saved default privacy — the user must choose per post.
+                base_opts.pop("privacy_level", None)
+                for flag in ("disable_comment", "disable_duet", "disable_stitch"):
+                    base_opts.setdefault(flag, True)
+            opts = {**base_opts, **user_opts, "burn_subtitles": settings.get("burn_subtitles", True)}
+            # TikTok Direct Post requires per-post UX (privacy, consent). Auto jobs stay drafts
+            # until the user completes the Post to TikTok form, even if require_approval is off.
+            force_draft = draft or (source == "auto" and target == "tiktok")
             job = SocialPublishJob(
                 project_id=row["project_id"], clip_id=clip_id, account_id=acct.id, target=target,
-                status="draft" if draft else "queued", source=source, scheduled_at=when, next_attempt_at=when,
+                status="draft" if force_draft else "queued", source=source, scheduled_at=when, next_attempt_at=when,
                 caption=captions[target], seo_report=reports.get(target),
-                options={**settings["defaults"].get(target, {}), **(options or {}).get(target, {}),
-                         "burn_subtitles": settings.get("burn_subtitles", True)},
+                options=opts,
                 attempts=0, max_attempts=4, history=[])
             _history(job, "created", source=source, status=job.status)
             db.add(job)
@@ -317,6 +362,13 @@ def update_job(job_id: str, patch: dict) -> dict:
         if job is None:
             raise FileNotFoundError("job not found")
         action = patch.get("action")
+        if "options" in patch and isinstance(patch["options"], dict):
+            job.options = {**(job.options or {}), **patch["options"]}
+        if action in ("approve", "publish_now", "retry") and job.target == "tiktok":
+            from .adapters.tiktok import options_block_reason
+            blocked = options_block_reason(job.options or {})
+            if blocked:
+                raise ValueError(blocked)
         if action == "approve":
             if job.status != "draft":
                 raise ValueError("only drafts can be approved")
@@ -352,8 +404,6 @@ def update_job(job_id: str, patch: dict) -> dict:
             when = parse_when(patch["scheduled_at"])
             job.scheduled_at = when
             job.next_attempt_at = when
-        if "options" in patch and isinstance(patch["options"], dict):
-            job.options = {**(job.options or {}), **patch["options"]}
         _history(job, "updated", action=action)
         db.commit()
         return job.public()
@@ -446,6 +496,15 @@ def process_job(job_id: str) -> dict:
             token = fresh_token(acct)
             db.commit()
             adapter = get_adapter(acct.platform)
+            if job.status == "queued" and job.target == "tiktok":
+                from .adapters.tiktok import options_block_reason
+                blocked = options_block_reason(job.options or {})
+                if blocked:
+                    job.status = "draft"
+                    job.error = blocked
+                    job.next_attempt_at = None
+                    _history(job, "needs_tiktok_consent", error=blocked)
+                    return job.public()
             if job.status == "processing":
                 if _processing_expired(job):
                     raise AdapterError("remote processing did not finish within 2 hours", code="remote_failed")

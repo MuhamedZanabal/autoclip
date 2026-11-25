@@ -89,6 +89,7 @@ export interface PublishJob {
   caption: Caption
   seo_report: SeoReport
   options: Record<string, unknown>
+  remote_id?: string
   remote_url?: string
   error?: string
   history: { at: string; event: string; [k: string]: unknown }[]
@@ -104,6 +105,30 @@ export interface ClipRow {
   score?: number
   status: string
   created_at: string
+}
+export interface TikTokCreatorInfo {
+  can_post: boolean
+  error_code?: string | null
+  error_message?: string | null
+  audited: boolean
+  creator_nickname?: string
+  creator_username?: string
+  creator_avatar_url?: string
+  privacy_level_options: string[]
+  comment_disabled: boolean
+  duet_disabled: boolean
+  stitch_disabled: boolean
+  max_video_post_duration_sec?: number
+}
+export interface TikTokPostOptions {
+  privacy_level?: string
+  disable_comment: boolean
+  disable_duet: boolean
+  disable_stitch: boolean
+  commercial_disclosure: boolean
+  brand_organic_toggle: boolean
+  brand_content_toggle: boolean
+  tiktok_consent: boolean
 }
 export interface PublisherSettings {
   auto_publish: boolean
@@ -134,10 +159,13 @@ export const socialApi = {
     api.get('/social/clips', { params: projectId ? { project_id: projectId } : {} }),
   generate: (clipId: string, targets: Target[]): Promise<SeoResult> =>
     api.post('/social/seo/generate', { clip_id: clipId, targets }, { timeout: 180000 }),
+  creatorInfo: (accountId: string): Promise<TikTokCreatorInfo> =>
+    api.get(`/social/accounts/${accountId}/creator-info`),
   createJobs: (body: {
     clip_id: string
     targets: { account_id: string; target: Target }[]
     captions?: Record<string, Caption>
+    options?: Record<string, Record<string, unknown>>
     scheduled_at?: string
     draft?: boolean
   }): Promise<{ jobs: PublishJob[] }> => api.post('/social/jobs', body, { timeout: 180000 }),

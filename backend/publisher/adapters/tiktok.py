@@ -20,6 +20,47 @@ MIN_CHUNK = 5 * 1024 * 1024
 DEFAULT_CHUNK = 10 * 1024 * 1024
 MAX_CHUNK = 64 * 1024 * 1024
 PRIVACY_LEVELS = ("PUBLIC_TO_EVERYONE", "MUTUAL_FOLLOW_FRIENDS", "FOLLOWER_OF_CREATOR", "SELF_ONLY")
+PRIVACY_LABELS = {
+    "PUBLIC_TO_EVERYONE": "Everyone",
+    "MUTUAL_FOLLOW_FRIENDS": "Friends",
+    "FOLLOWER_OF_CREATOR": "Followers",
+    "SELF_ONLY": "Only me",
+}
+POSTING_BLOCKED = {
+    "spam_risk_too_many_posts": "This TikTok account has reached today's post limit. Try again later.",
+    "spam_risk_user_banned_from_posting": "This TikTok account is currently banned from posting.",
+    "reached_active_user_cap": "This app has reached today's active-creator limit. Try again later.",
+}
+MUSIC_USAGE_URL = "https://www.tiktok.com/legal/page/global/music-usage-confirmation/en"
+BRANDED_CONTENT_POLICY_URL = "https://www.tiktok.com/legal/page/global/bc-policy/en"
+CONSENT_MUSIC = "By posting, you agree to TikTok's Music Usage Confirmation"
+CONSENT_BRANDED = "By posting, you agree to TikTok's Branded Content Policy and Music Usage Confirmation"
+
+
+def consent_text(brand_content: bool) -> str:
+    return CONSENT_BRANDED if brand_content else CONSENT_MUSIC
+
+
+def options_ready(options: dict | None) -> bool:
+    return options_block_reason(options) is None
+
+
+def options_block_reason(options: dict | None) -> str | None:
+    """Why a TikTok job cannot be sent yet (UX-guideline checks). None = ready."""
+    opts = options or {}
+    privacy = str(opts.get("privacy_level") or "").upper()
+    if privacy not in PRIVACY_LEVELS:
+        return "Select a privacy level. TikTok requires a manual choice with no default."
+    commercial = bool(opts.get("commercial_disclosure") or opts.get("brand_organic_toggle") or opts.get("brand_content_toggle"))
+    brand_organic = bool(opts.get("brand_organic_toggle"))
+    brand_content = bool(opts.get("brand_content_toggle"))
+    if commercial and not (brand_organic or brand_content):
+        return "You need to indicate if your content promotes yourself, a third party, or both."
+    if brand_content and privacy == "SELF_ONLY":
+        return "Branded content visibility cannot be set to private."
+    if not opts.get("tiktok_consent"):
+        return "Confirm that by posting, you agree to TikTok's Music Usage Confirmation."
+    return None
 
 
 def chunk_plan(size: int, chunk: int = DEFAULT_CHUNK) -> tuple[int, int]:
@@ -134,38 +175,71 @@ class TikTokAdapter(BaseAdapter):
             "client_key": self.creds.client_id, "client_secret": self.creds.client_secret,
             "token": token.access_token})
 
-    def creator_info(self, token: TokenBundle) -> dict:
+    def query_creator_info(self, token: TokenBundle) -> dict:
+        """Latest creator_info, including posting-cap errors that must block the UI."""
         resp = self.request("POST", f"{API}/post/publish/creator_info/query/", "creator_info",
                             headers={"Authorization": f"Bearer {token.access_token}",
                                      "Content-Type": "application/json; charset=UTF-8"}, json={})
-        return self._check(resp, "creator_info").get("data") or {}
+        try:
+            body = resp.json()
+        except ValueError:
+            body = {}
+        err = (body.get("error") or {}) if isinstance(body.get("error"), dict) else {}
+        code = err.get("code")
+        data = body.get("data") or {}
+        if code in POSTING_BLOCKED:
+            return {"can_post": False, "error_code": code, "error_message": POSTING_BLOCKED[code], "data": data}
+        self._check(resp, "creator_info")
+        return {"can_post": True, "error_code": None, "error_message": None, "data": data}
+
+    def creator_info(self, token: TokenBundle) -> dict:
+        result = self.query_creator_info(token)
+        if not result["can_post"]:
+            raise AdapterError(result["error_message"], code=result["error_code"])
+        return result["data"]
 
     @staticmethod
     def choose_privacy(requested: str | None, options: list[str], audited: bool) -> tuple[str, str | None]:
+        # Unaudited clients may only post SELF_ONLY. The compose UI still requires a manual
+        # selection; this override is TikTok's unaudited-app restriction, not a default.
         if not audited:
             if options and "SELF_ONLY" not in options:
                 raise AdapterError("TikTok app is unaudited and SELF_ONLY is not offered for this creator", code="privacy")
             return "SELF_ONLY", "TikTok app not audited yet: posted as private (SELF_ONLY)"
-        wanted = (requested or "PUBLIC_TO_EVERYONE").upper()
-        if not options or wanted in options:
-            return wanted, None
-        raise AdapterError(f"TikTok privacy '{wanted}' is not available for this creator (allowed: {', '.join(options)})",
-                           code="privacy_level_option_mismatch")
+        wanted = str(requested or "").upper()
+        if wanted not in PRIVACY_LEVELS:
+            raise AdapterError("Select a privacy level. TikTok requires a manual choice with no default.",
+                               code="privacy_required")
+        if options and wanted not in options:
+            raise AdapterError(f"TikTok privacy '{wanted}' is not available for this creator (allowed: {', '.join(options)})",
+                               code="privacy_level_option_mismatch")
+        return wanted, None
 
     def publish(self, ctx: PublishContext) -> PublishResult:
+        blocked = options_block_reason(ctx.options)
+        if blocked:
+            raise AdapterError(blocked, code="tiktok_ux")
         info = self.creator_info(ctx.token)
         max_dur = info.get("max_video_post_duration_sec")
         if max_dur and ctx.duration_sec and ctx.duration_sec > float(max_dur):
             raise AdapterError(f"Clip is {ctx.duration_sec:.0f}s; this TikTok account allows {max_dur}s max")
         privacy, note = self.choose_privacy(ctx.options.get("privacy_level"), info.get("privacy_level_options") or [], _audited())
+        # Interactions default off (disable_*=True) unless the user turned them on.
+        # If TikTok reports the interaction disabled in the creator's settings, force it off.
+        def _disabled(flag: str, creator_disabled: str) -> bool:
+            if info.get(creator_disabled):
+                return True
+            if flag in (ctx.options or {}):
+                return bool(ctx.options[flag])
+            return True
         size = ctx.video_path.stat().st_size
         chunk_size, total = chunk_plan(size)
-        caption = str(ctx.caption.get("caption") or ctx.caption.get("title") or "")[:2200]
+        caption = str(ctx.caption.get("title") or ctx.caption.get("caption") or "")[:2200]
         post_info = {
             "title": caption, "privacy_level": privacy,
-            "disable_comment": bool(ctx.options.get("disable_comment", False) or info.get("comment_disabled")),
-            "disable_duet": bool(ctx.options.get("disable_duet", False) or info.get("duet_disabled")),
-            "disable_stitch": bool(ctx.options.get("disable_stitch", False) or info.get("stitch_disabled")),
+            "disable_comment": _disabled("disable_comment", "comment_disabled"),
+            "disable_duet": _disabled("disable_duet", "duet_disabled"),
+            "disable_stitch": _disabled("disable_stitch", "stitch_disabled"),
             "video_cover_timestamp_ms": int(ctx.options.get("cover_timestamp_ms", 1000)),
             "brand_content_toggle": bool(ctx.options.get("brand_content_toggle", False)),
             "brand_organic_toggle": bool(ctx.options.get("brand_organic_toggle", False)),

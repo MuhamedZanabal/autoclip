@@ -7,10 +7,11 @@ import {
 import dayjs, { Dayjs } from 'dayjs'
 import {
   Caption, ClipRow, Platform, PLATFORM_LABEL, PublisherSettings, PublishJob, SeoReport, SeoResult, socialApi,
-  SocialAccount, SocialStatus, Target, TARGET_LABEL,
+  SocialAccount, SocialStatus, Target, TARGET_LABEL, TikTokPostOptions,
 } from '../publish/socialApi'
 import { AccountsPanel, DeveloperAppsPanel, errText } from '../publish/AccountsAndApps'
 import BrandLoginButton from '../publish/BrandLoginButton'
+import TikTokPostForm, { emptyTikTokOptions, tiktokFormBlockReason } from '../publish/TikTokPostForm'
 
 const { Text, Paragraph } = Typography
 
@@ -33,14 +34,15 @@ const ScoreBadge: React.FC<{ report?: SeoReport }> = ({ report }) => {
 // ------------------------------------------------------------------ compose ---
 const CaptionEditor: React.FC<{ target: Target; value: Caption; report?: SeoReport; onChange: (c: Caption) => void }> = ({ target, value, report, onChange }) => {
   const yt = target.startsWith('youtube')
+  const tiktok = target === 'tiktok'
   const text = yt ? value.description || '' : value.caption || ''
   const limit = yt ? 5000 : 2200
   return (
     <Card size="small" title={<Space>{TARGET_LABEL[target]}<ScoreBadge report={report} /></Space>} style={{ marginBottom: 12 }}>
-      {yt && (
+      {(yt || tiktok) && (
         <Input
-          addonBefore="Title" value={value.title} maxLength={100} showCount style={{ marginBottom: 8 }}
-          onChange={(e) => onChange({ ...value, title: e.target.value })}
+          addonBefore="Title" value={value.title || (tiktok ? value.caption : '') || ''} maxLength={yt ? 100 : 150} showCount style={{ marginBottom: 8 }}
+          onChange={(e) => onChange(tiktok ? { ...value, title: e.target.value, caption: e.target.value } : { ...value, title: e.target.value })}
         />
       )}
       <Input.TextArea
@@ -66,6 +68,8 @@ const ComposePanel: React.FC<{ accounts: SocialAccount[]; projectId?: string; cl
   const [captions, setCaptions] = useState<Record<string, Caption>>({})
   const [busy, setBusy] = useState<'' | 'seo' | 'publish'>('')
   const [when, setWhen] = useState<Dayjs | null>(null)
+  const [tiktokOpts, setTiktokOpts] = useState<TikTokPostOptions>(emptyTikTokOptions())
+  const [tiktokLiveBlock, setTiktokLiveBlock] = useState<string | undefined>('Select who can watch this post. There is no default privacy setting.')
 
   useEffect(() => { socialApi.clips(projectId).then((r) => setClips(r.clips)).catch((e) => message.error(errText(e))) }, [projectId])
   useEffect(() => { if (clipId) setClip(clipId) }, [clipId])
@@ -73,6 +77,10 @@ const ComposePanel: React.FC<{ accounts: SocialAccount[]; projectId?: string; cl
   const options = useMemo(() => accounts.filter((a) => a.status === 'active').flatMap((a) =>
     TARGETS_FOR[a.platform].map((t) => ({ value: `${a.id}|${t}`, label: `${TARGET_LABEL[t]} · ${a.display_name || a.username || a.platform}` }))), [accounts])
   const targets = useMemo(() => Array.from(new Set(picked.map((p) => p.split('|')[1] as Target))), [picked])
+  const selectedClip = clips.find((c) => c.id === clip)
+  const tiktokPicks = useMemo(() => picked.filter((p) => p.split('|')[1] === 'tiktok').map((p) => p.split('|')[0]), [picked])
+  const tiktokAccount = accounts.find((a) => a.id === tiktokPicks[0])
+  const tiktokBlocked = tiktokPicks.length ? (tiktokLiveBlock || tiktokFormBlockReason(tiktokOpts, undefined, selectedClip?.duration)) : undefined
 
   const generate = async () => {
     if (!clip) return
@@ -93,6 +101,7 @@ const ComposePanel: React.FC<{ accounts: SocialAccount[]; projectId?: string; cl
         clip_id: clip,
         targets: picked.map((p) => { const [account_id, target] = p.split('|'); return { account_id, target: target as Target } }),
         captions: Object.fromEntries(targets.filter((t) => captions[t]).map((t) => [t, captions[t]])),
+        options: tiktokPicks.length ? { tiktok: { ...tiktokOpts } } : undefined,
         scheduled_at: when ? when.toDate().toISOString() : undefined,
         draft,
       })
@@ -119,12 +128,27 @@ const ComposePanel: React.FC<{ accounts: SocialAccount[]; projectId?: string; cl
             <DatePicker showTime value={when} onChange={setWhen} style={{ width: '100%' }} placeholder="Publish now (or pick a time)"
               disabledDate={(d) => d.isBefore(dayjs().startOf('day'))} />
             <Button block onClick={generate} loading={busy === 'seo'} disabled={!clip}>Generate SEO captions</Button>
-            <Button type="primary" block onClick={() => publish(false)} loading={busy === 'publish'} disabled={!clip || !picked.length}>
+            <Button type="primary" block onClick={() => publish(false)} loading={busy === 'publish'}
+              disabled={!clip || !picked.length || !!tiktokBlocked} data-testid="publish-now">
               {when ? 'Schedule' : 'Publish now'}
             </Button>
-            <Button block onClick={() => publish(true)} disabled={!clip || !picked.length}>Save as drafts for approval</Button>
+            <Button block onClick={() => publish(true)} disabled={!clip || !picked.length} data-testid="save-drafts">
+              Save as drafts for approval
+            </Button>
+            {tiktokBlocked && tiktokPicks.length > 0 && (
+              <Text type="secondary" style={{ fontSize: 12 }}>{tiktokBlocked}</Text>
+            )}
           </Space>
         </Card>
+        {tiktokAccount && (
+          <Card title="3 · TikTok post settings" style={{ marginTop: 16 }} data-testid="tiktok-compose-card">
+            <TikTokPostForm account={tiktokAccount} clip={selectedClip} value={tiktokOpts} onChange={setTiktokOpts} onValidityChange={setTiktokLiveBlock} />
+            {tiktokPicks.length > 1 && (
+              <Alert style={{ marginTop: 12 }} type="info" showIcon
+                message="These settings apply to every TikTok account selected above." />
+            )}
+          </Card>
+        )}
       </Col>
       <Col xs={24} lg={15}>
         <Card title={<Space>2 · Captions{seo && <Tag>{seo.source === 'llm' ? `AI · ${seo.model || ''}` : 'Keyword fallback'}</Tag>}</Space>}>
@@ -146,9 +170,35 @@ const ComposePanel: React.FC<{ accounts: SocialAccount[]; projectId?: string; cl
 const QueuePanel: React.FC<{ jobs: PublishJob[]; accounts: SocialAccount[]; reload: () => void }> = ({ jobs, accounts, reload }) => {
   const [editing, setEditing] = useState<PublishJob>()
   const [draft, setDraft] = useState<Caption>({})
+  const [ttOpts, setTtOpts] = useState<TikTokPostOptions>(emptyTikTokOptions())
   const acct = (id: string) => accounts.find((a) => a.id === id)
   const act = async (job: PublishJob, patch: Record<string, unknown>) => {
     try { await socialApi.updateJob(job.id, patch); reload() } catch (e) { message.error(errText(e)) }
+  }
+  const fromJobOptions = (job: PublishJob): TikTokPostOptions => ({
+    ...emptyTikTokOptions(),
+    privacy_level: typeof job.options?.privacy_level === 'string' ? job.options.privacy_level : undefined,
+    disable_comment: job.options?.disable_comment !== false,
+    disable_duet: job.options?.disable_duet !== false,
+    disable_stitch: job.options?.disable_stitch !== false,
+    commercial_disclosure: !!(job.options?.commercial_disclosure || job.options?.brand_organic_toggle || job.options?.brand_content_toggle),
+    brand_organic_toggle: !!job.options?.brand_organic_toggle,
+    brand_content_toggle: !!job.options?.brand_content_toggle,
+    tiktok_consent: !!job.options?.tiktok_consent,
+  })
+  const openEdit = (job: PublishJob) => {
+    setEditing(job)
+    setDraft(job.caption)
+    if (job.target === 'tiktok') setTtOpts(fromJobOptions(job))
+  }
+  const tiktokReadyToSend = (job: PublishJob) => job.target !== 'tiktok' || !tiktokFormBlockReason(fromJobOptions(job))
+  const approveOrPost = (job: PublishJob, action: 'approve' | 'publish_now') => {
+    if (job.target === 'tiktok' && !tiktokReadyToSend(job)) {
+      openEdit(job)
+      message.info('Complete the TikTok post form, then approve.')
+      return
+    }
+    void act(job, { action })
   }
   return (
     <>
@@ -162,8 +212,10 @@ const QueuePanel: React.FC<{ jobs: PublishJob[]; accounts: SocialAccount[]; relo
           </div> },
           { title: 'Status', render: (_, j) => <Space direction="vertical" size={2}>
             <Tag color={STATUS_COLOR[j.status]}>{j.status}</Tag>
+            {j.status === 'processing' && <Text type="secondary" style={{ fontSize: 12 }}>It may take a few minutes for the content to process and be visible on your profile.</Text>}
             {j.error && <Tooltip title={j.error}><Text type="danger" style={{ fontSize: 12 }}>{j.error.slice(0, 60)}</Text></Tooltip>}
             {j.status === 'queued' && j.attempts > 0 && <Text type="secondary" style={{ fontSize: 12 }}>retry {j.attempts}/{j.max_attempts}</Text>}
+            {j.remote_id && j.status === 'processing' && <Text type="secondary" style={{ fontSize: 12 }}>publish id {j.remote_id}</Text>}
           </Space> },
           { title: 'SEO', render: (_, j) => <ScoreBadge report={j.seo_report} /> },
           { title: 'When', render: (_, j) => <Text style={{ fontSize: 12 }}>
@@ -171,9 +223,9 @@ const QueuePanel: React.FC<{ jobs: PublishJob[]; accounts: SocialAccount[]; relo
           </Text> },
           { title: '', render: (_, j) => <Space wrap>
             {j.remote_url && <Button size="small" href={j.remote_url} target="_blank">Open</Button>}
-            {j.status === 'draft' && <Button size="small" type="primary" onClick={() => act(j, { action: 'approve' })}>Approve</Button>}
-            {['draft', 'queued', 'failed'].includes(j.status) && <Button size="small" onClick={() => { setEditing(j); setDraft(j.caption) }}>Edit</Button>}
-            {['draft', 'queued'].includes(j.status) && <Button size="small" onClick={() => act(j, { action: 'publish_now' })}>Post now</Button>}
+            {j.status === 'draft' && <Button size="small" type="primary" onClick={() => approveOrPost(j, 'approve')}>Approve</Button>}
+            {['draft', 'queued', 'failed'].includes(j.status) && <Button size="small" onClick={() => openEdit(j)}>Edit</Button>}
+            {['draft', 'queued'].includes(j.status) && <Button size="small" onClick={() => approveOrPost(j, 'publish_now')}>Post now</Button>}
             {['failed', 'cancelled'].includes(j.status) && <Button size="small" onClick={() => act(j, { action: 'retry' })}>Retry</Button>}
             {['draft', 'queued'].includes(j.status) && <Button size="small" danger onClick={() => act(j, { action: 'cancel' })}>Cancel</Button>}
             {['published', 'failed', 'cancelled', 'draft'].includes(j.status) && (
@@ -183,10 +235,24 @@ const QueuePanel: React.FC<{ jobs: PublishJob[]; accounts: SocialAccount[]; relo
           </Space> },
         ]}
       />
-      <Modal open={!!editing} title={editing ? `Edit ${TARGET_LABEL[editing.target]} caption` : ''} width={720}
+      <Modal open={!!editing} title={editing ? `Edit ${TARGET_LABEL[editing.target]} post` : ''} width={720}
         onCancel={() => setEditing(undefined)}
-        onOk={async () => { if (editing) { await act(editing, { caption: draft }); setEditing(undefined) } }}>
+        okText={editing?.status === 'draft' && editing.target === 'tiktok' ? 'Save and approve' : 'Save'}
+        okButtonProps={{ disabled: !!(editing?.target === 'tiktok' && tiktokFormBlockReason(ttOpts)) }}
+        onOk={async () => {
+          if (!editing) return
+          const patch: Record<string, unknown> = { caption: draft }
+          if (editing.target === 'tiktok') patch.options = { ...ttOpts }
+          if (editing.status === 'draft' && editing.target === 'tiktok') patch.action = 'approve'
+          await act(editing, patch)
+          setEditing(undefined)
+        }}>
         {editing && <CaptionEditor target={editing.target} value={draft} onChange={setDraft} report={editing.seo_report} />}
+        {editing?.target === 'tiktok' && acct(editing.account_id) && (
+          <div style={{ marginTop: 16 }}>
+            <TikTokPostForm account={acct(editing.account_id)!} value={ttOpts} onChange={setTtOpts} />
+          </div>
+        )}
       </Modal>
     </>
   )
@@ -228,10 +294,9 @@ const AutomationPanel: React.FC<{ accounts: SocialAccount[] }> = ({ accounts }) 
           <div style={{ marginBottom: 6 }}><b>Brand hashtags</b> (added to every post)</div>
           <Select mode="tags" style={{ width: '100%' }} value={s.brand_hashtags} onChange={(v) => save({ brand_hashtags: v })} placeholder="e.g. ZedosAI" />
         </div>
+        <Alert type="info" showIcon
+          message="TikTok posts created by auto-publish stay as drafts until you complete the Post to TikTok form (privacy, interactions, and Music Usage Confirmation). TikTok does not allow a default privacy setting or fully automatic posting without that per-post confirmation." />
         <Space wrap size="large">
-          <span>TikTok privacy <Select style={{ width: 210 }} value={String(s.defaults.tiktok?.privacy_level || 'PUBLIC_TO_EVERYONE')}
-            onChange={(v) => save({ defaults: { ...s.defaults, tiktok: { ...s.defaults.tiktok, privacy_level: v } } })}
-            options={['PUBLIC_TO_EVERYONE', 'MUTUAL_FOLLOW_FRIENDS', 'FOLLOWER_OF_CREATOR', 'SELF_ONLY'].map((v) => ({ value: v, label: v }))} /></span>
           <span>YouTube visibility <Select style={{ width: 120 }} value={String(s.defaults.youtube?.privacy_status || 'public')}
             onChange={(v) => save({ defaults: { ...s.defaults, youtube: { ...s.defaults.youtube, privacy_status: v }, youtube_shorts: { ...s.defaults.youtube_shorts, privacy_status: v } } })}
             options={['public', 'unlisted', 'private'].map((v) => ({ value: v, label: v }))} /></span>
