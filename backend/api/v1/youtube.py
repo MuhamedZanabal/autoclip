@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent.parent))
 from ...core.config import get_data_directory
-from ...utils.ffmpeg_utils import ytdlp_ffmpeg_options
+from ...utils.ffmpeg_utils import ytdlp_ffmpeg_options, ytdlp_cookie_options, ytdlp_js_runtimes
 import uuid
 import asyncio
 from datetime import datetime
@@ -121,6 +121,13 @@ async def parse_youtube_video(
             
             if browser:
                 cmd.extend(['--cookies-from-browser', browser.lower()])
+            else:
+                # Server cookie jar (data/cookies/cookies.txt): the OCI IP is bot-checked without it.
+                cookiefile = ytdlp_cookie_options().get('cookiefile')
+                if cookiefile:
+                    cmd.extend(['--cookies', cookiefile])
+            for rt_name, rt in (ytdlp_js_runtimes().get('js_runtimes') or {}).items():
+                cmd.extend(['--js-runtimes', f"{rt_name}:{rt['path']}"])
 
             # 可选兜底客户端，规避 SABR
             yt_client = (client or os.getenv('AUTOCLIP_YT_CLIENT', '')).strip().lower()
@@ -217,6 +224,11 @@ async def create_youtube_download_task(request: YouTubeDownloadRequest):
         
         if request.browser:
             ydl_opts['cookiesfrombrowser'] = (request.browser.lower(),)
+        else:
+            # The info step used to ignore the server cookie jar and failed with
+            # "Sign in to confirm you're not a bot" on the OCI IP before the download even started.
+            ydl_opts.update(ytdlp_cookie_options())
+        ydl_opts.update(ytdlp_js_runtimes())
 
         # 可选兜底客户端
         yt_client_env = os.getenv('AUTOCLIP_YT_CLIENT', '').strip().lower()

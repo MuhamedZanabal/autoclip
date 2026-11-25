@@ -68,7 +68,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # YouTube changes its player often; keep yt-dlp + the EJS solver current without editing the
 # desktop pin in requirements.txt (override with --build-arg when YouTube breaks again).
-ARG YTDLP_VERSION=2026.10.26
+ARG YTDLP_VERSION=2026.11.23
 ARG YTDLP_EJS_VERSION=0.8.0
 RUN pip install --no-cache-dir -U "yt-dlp[default]==${YTDLP_VERSION}" "yt-dlp-ejs==${YTDLP_EJS_VERSION}"
 
