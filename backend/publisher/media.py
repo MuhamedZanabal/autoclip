@@ -16,7 +16,7 @@ from .seo import ClipContext
 
 logger = logging.getLogger(__name__)
 
-SHORT_MAX_SEC = 60.0
+SHORT_MAX_SEC = 180.0  # YouTube Shorts allow up to 3 minutes (since Oct 2024)
 
 
 # ----------------------------------------------------------------- clips ---

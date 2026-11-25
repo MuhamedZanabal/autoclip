@@ -18,7 +18,9 @@ AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 API = "https://www.googleapis.com/youtube/v3"
 UPLOAD = "https://www.googleapis.com/upload/youtube/v3/videos"
-SCOPES = "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly"
+# force-ssl: read/reply to comments; youtube: channel branding (banner). Re-auth updates the same account row.
+SCOPES = ("https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly "
+          "https://www.googleapis.com/auth/youtube.force-ssl https://www.googleapis.com/auth/youtube")
 CHUNK = 8 * 256 * 1024 * 4  # 8 MiB, a multiple of 256 KiB as the resumable protocol requires
 
 

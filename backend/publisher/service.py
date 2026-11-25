@@ -455,9 +455,18 @@ def process_job(job_id: str) -> dict:
                 job.status = "rendering"
                 _history(job, "rendering", attempt=job.attempts)
                 db.commit()
-                row = media.get_clip(job.clip_id)
-                path, duration, notes = media.render_for_target(row, job.target,
-                                                                subtitles=bool((job.options or {}).get("burn_subtitles", True)))
+                pre = str((job.options or {}).get("prerendered_path") or "")
+                if pre and job.target == "youtube":
+                    # Long-form video rendered by an external tool (tm-agent); only files under data/longform.
+                    pre_path = Path(pre).resolve()
+                    root = (Path(__file__).resolve().parents[2] / "data" / "longform").resolve()
+                    if root not in pre_path.parents or not pre_path.is_file():
+                        raise AdapterError(f"prerendered media not found or outside data/longform: {pre}")
+                    path, duration, notes = pre_path, float(media.probe(pre_path).get("duration") or 0), ["prerendered long-form"]
+                else:
+                    row = media.get_clip(job.clip_id)
+                    path, duration, notes = media.render_for_target(row, job.target,
+                                                                    subtitles=bool((job.options or {}).get("burn_subtitles", True)))
                 job.video_path = str(path)
                 job.options = {**(job.options or {}), "duration_sec": duration}
                 if job.target == "youtube_shorts" and duration > media.SHORT_MAX_SEC + 0.5:
